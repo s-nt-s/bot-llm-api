@@ -72,9 +72,14 @@ func NewUser(bot *BotConfig, user string) (*UserConfig, error) {
 }
 
 func NewOptionalUser(bot *BotConfig, user string) *UserConfig {
+	if user == "" {
+		return nil
+	}
 	userConfig, err := NewUser(bot, user)
 	if err != nil {
-		return nil
+		return &UserConfig{
+			Name: user,
+		}
 	}
 	return userConfig
 }

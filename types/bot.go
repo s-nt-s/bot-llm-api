@@ -117,11 +117,20 @@ func (c *Bot) GetSystemPrompt() string {
 			tm.Location().String(),
 		) + "\n\n" + systemPrompt
 	}
-	if c.User != nil && c.User.Name != "" {
-		systemPrompt = systemPrompt + "\n\n" + fmt.Sprintf(
-			"User name: %s",
-			c.User.Name,
-		)
+	if c.User != nil {
+		if c.User.Name != "" {
+			systemPrompt = systemPrompt + "\n\n" + fmt.Sprintf(
+				"User name: %s",
+				c.User.Name,
+			)
+		}
+		if c.User.Profile != "" {
+			systemPrompt = systemPrompt + "\n\n" + fmt.Sprintf(
+				"User profile: %s",
+				c.User.Profile,
+			)
+		}
+
 	}
 	return systemPrompt
 }
