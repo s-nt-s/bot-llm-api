@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // LLMProvider defines the minimal interface any LLM backend must implement.
@@ -16,13 +17,24 @@ type ConversationMessage struct {
 	Time    int64  `json:"time"`
 }
 
+type ConversationKey struct {
+	botName  string
+	userName string
+}
+
 type LLMProvider interface {
 	Name() string
-	Query(ask string, bot *BotConfig, user *UserConfig) (string, error)
-	Chat(ask string, bot *BotConfig, user *UserConfig) (string, error)
-	Conversation(bot *BotConfig, user *UserConfig) []ConversationMessage
-	ClearConversation(bot *BotConfig, user *UserConfig)
-	PopConversation(bot *BotConfig, user *UserConfig) []ConversationMessage
+	IsReady() bool
+	Query(
+		systemPrompt string,
+		userPrompt string,
+	) *Message
+	Chat(
+		conversationKey ConversationKey,
+		systemPrompt string,
+		userPrompt string,
+		history []ConversationMessage,
+	) *Message
 }
 
 // QuotaExceededError is returned when a provider refuses the request due to quota exhaustion.
@@ -50,33 +62,13 @@ func (e *QuotaExceededError) Unwrap() error {
 
 var (
 	providerMu sync.RWMutex
-	providers  = map[string]func() LLMProvider{}
+	PROVIDERS  []LLMProvider
 )
 
-// RegisterProvider registers a provider factory so it can be used by the bot pool.
-func RegisterProvider(name string, factory func() LLMProvider) {
+func RegisterProvider(provider LLMProvider) {
 	providerMu.Lock()
 	defer providerMu.Unlock()
-	providers[name] = factory
-}
-
-// UnregisterProvider removes a provider factory from the registry.
-func UnregisterProvider(name string) {
-	providerMu.Lock()
-	defer providerMu.Unlock()
-	delete(providers, name)
-}
-
-// DefaultProviders returns the registered provider factories in a stable order.
-func DefaultProviders() []LLMProvider {
-	providerMu.RLock()
-	defer providerMu.RUnlock()
-
-	ordered := make([]LLMProvider, 0, len(providers))
-	for _, factory := range providers {
-		ordered = append(ordered, factory())
-	}
-	return ordered
+	PROVIDERS = append(PROVIDERS, provider)
 }
 
 // Bot keeps a shared configuration and user, and can try multiple LLM providers in order.
@@ -84,50 +76,59 @@ type Bot struct {
 	Config *BotConfig
 	User   *UserConfig
 
-	Providers     []LLMProvider
-	queryProvider int
-	chatProvider  int
+	chatProvider *LLMProvider
+	history      []ConversationMessage
+}
+
+func (c *Bot) addIteration(askTime int64, ask string, reply string) *Message {
+	c.history = append(c.history, ConversationMessage{
+		Name:    c.User.Name,
+		Message: ask,
+		Time:    askTime,
+	})
+	c.history = append(c.history, ConversationMessage{
+		Name:    c.Config.Name,
+		Message: reply,
+		Time:    time.Now().Unix(),
+	})
 }
 
 func (c *Bot) DoChat(ask string) *Message {
-	if len(c.Providers) == 0 {
+	askTime := time.Now().Unix()
+	if len(PROVIDERS) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
 			Error:  "no LLM providers configured",
 		}
 	}
-
-	var lastErr error
-	for i := 0; i < len(c.Providers); i++ {
-		providerIndex := (c.chatProvider + i) % len(c.Providers)
-		provider := c.Providers[providerIndex]
-		reply, err := provider.Chat(ask, c.Config, c.User)
-		if err == nil {
-			c.chatProvider = providerIndex
-			return &Message{
-				Reply:  reply,
-				Status: http.StatusOK,
-			}
+	conversationKey := ConversationKey{botName: c.Config.Name, userName: c.User.Name}
+	systemPrompt := c.Config.Profile
+	userPrompt := ask
+	if c.chatProvider != nil {
+		pr := (*c.chatProvider)
+		r := pr.Chat(conversationKey, systemPrompt, userPrompt, c.history)
+		if r.Status == http.StatusOK {
+			c.addIteration(askTime, ask, r.Reply)
+			return r
 		}
-
-		var quotaErr *QuotaExceededError
-		if errors.As(err, &quotaErr) {
-			lastErr = err
+	}
+	c.chatProvider = nil
+	var lastErr *Message = nil
+	for i := 0; i < len(PROVIDERS); i++ {
+		provider := PROVIDERS[i]
+		if !provider.IsReady() {
 			continue
 		}
-
-		c.chatProvider = providerIndex
-		return &Message{
-			Status: http.StatusBadGateway,
-			Error:  fmt.Sprintf("provider %q failed: %v", provider.Name(), err),
+		r := provider.Chat(conversationKey, systemPrompt, userPrompt, c.history)
+		if r.Status == http.StatusOK {
+			c.addIteration(askTime, ask, r.Reply)
+			return r
 		}
+		lastErr = r
 	}
 
 	if lastErr != nil {
-		return &Message{
-			Status: http.StatusTooManyRequests,
-			Error:  lastErr.Error(),
-		}
+		return lastErr
 	}
 
 	return &Message{
@@ -137,7 +138,7 @@ func (c *Bot) DoChat(ask string) *Message {
 }
 
 func (c *Bot) DoQuery(ask string) *Message {
-	if len(c.Providers) == 0 {
+	if len(PROVIDERS) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
 			Error:  "no LLM providers configured",
@@ -145,12 +146,13 @@ func (c *Bot) DoQuery(ask string) *Message {
 	}
 
 	var lastErr error
-	for i := 0; i < len(c.Providers); i++ {
-		providerIndex := (c.queryProvider + i) % len(c.Providers)
-		provider := c.Providers[providerIndex]
+	for i := 0; i < len(PROVIDERS); i++ {
+		provider := PROVIDERS[i]
+		if !provider.IsReady() {
+			continue
+		}
 		reply, err := provider.Query(ask, c.Config, c.User)
 		if err == nil {
-			c.queryProvider = providerIndex
 			return &Message{
 				Reply:  reply,
 				Status: http.StatusOK,
@@ -163,7 +165,6 @@ func (c *Bot) DoQuery(ask string) *Message {
 			continue
 		}
 
-		c.queryProvider = providerIndex
 		return &Message{
 			Status: http.StatusBadGateway,
 			Error:  fmt.Sprintf("provider %q failed: %v", provider.Name(), err),

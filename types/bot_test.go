@@ -57,8 +57,14 @@ func TestBotFallsBackWhenCurrentProviderExhaustsQuota(t *testing.T) {
 	if msg.Reply != "ok" {
 		t.Fatalf("reply = %q, want %q", msg.Reply, "ok")
 	}
-	if bot.queryProvider != 1 {
-		t.Fatalf("queryProvider = %d, want %d", bot.queryProvider, 1)
+	if len(bot.readyAt) != 2 {
+		t.Fatalf("readyAt length = %d, want %d", len(bot.readyAt), 2)
+	}
+	if bot.readyAt[0] == -1 {
+		t.Fatal("expected first provider to be marked exhausted after quota error")
+	}
+	if bot.readyAt[1] != -1 {
+		t.Fatalf("expected fallback provider to remain ready, got %d", bot.readyAt[1])
 	}
 }
 

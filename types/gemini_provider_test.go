@@ -34,7 +34,7 @@ func TestGeminiProviderChatUsesPreviousInteractionID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := &geminiProvider{apiKey: "abc", endpoint: server.URL, client: server.Client(), conversationStates: map[conversationKey]string{}}
+	provider := &geminiProvider{apiKey: "abc", endpoint: server.URL, client: server.Client(), conversationStates: map[ConversationKey]string{}}
 	bot := &BotConfig{Name: "bot", Profile: "You are helpful"}
 	user := &UserConfig{Name: "user"}
 	provider.storePreviousInteractionID(bot, user, "prev-1")
