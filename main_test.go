@@ -10,9 +10,33 @@ import (
 	"testing"
 )
 
+type stubProvider struct {
+	name  string
+	reply string
+	err   error
+}
+
+func (p *stubProvider) Name() string {
+	return p.name
+}
+
+func (p *stubProvider) Ask(ask string, bot *types.BotConfig, user *types.UserConfig) (string, error) {
+	if p.err != nil {
+		return "", p.err
+	}
+	return p.reply, nil
+}
+
 func TestHandleRequestTreatsUserAsOptional(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
+
+		types.RegisterProvider("test-provider", func() types.LLMProvider {
+			return &stubProvider{name: "test-provider", reply: "ok"}
+		})
+		t.Cleanup(func() {
+			types.UnregisterProvider("test-provider")
+		})
 
 		req := httptest.NewRequest(http.MethodGet, "/blas/query?ask=hello", nil)
 		recorder := httptest.NewRecorder()

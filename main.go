@@ -120,8 +120,9 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 func getResponse(endpoint EndpointType, bot *types.BotConfig, user *types.UserConfig, ask string) *types.Message {
 	botManager := &types.Bot{
-		Config: bot,
-		User:   user,
+		Config:    bot,
+		User:      user,
+		Providers: types.DefaultProviders(),
 	}
 	if endpoint == EndpointTypeQuery {
 		return botManager.DoQuery(ask)
