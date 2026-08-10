@@ -37,14 +37,33 @@ func TestGeminiProviderChatUsesPreviousInteractionID(t *testing.T) {
 	provider := &geminiProvider{apiKey: "abc", endpoint: server.URL, client: server.Client(), conversationStates: map[ConversationKey]string{}}
 	bot := &BotConfig{Name: "bot", Profile: "You are helpful"}
 	user := &UserConfig{Name: "user"}
-	provider.storePreviousInteractionID(bot, user, "prev-1")
+	conversationKey := ConversationKey{botName: bot.Name, userName: user.Name}
+	provider.storePreviousInteractionID(conversationKey, "prev-1")
 
-	_, err := provider.Chat("hello", bot, user)
-	if err != nil {
-		t.Fatalf("Chat() error = %v", err)
+	r := provider.Chat(conversationKey, bot.Profile, "hello", nil)
+	if r.Status != http.StatusOK {
+		t.Fatalf("Chat() status = %d, error = %v", r.Status, r.Error)
 	}
 
 	if received["previous_interaction_id"] != "prev-1" {
 		t.Fatalf("previous_interaction_id = %#v, want %q", received["previous_interaction_id"], "prev-1")
+	}
+}
+
+func TestGeminiProviderParsesCandidatePartsText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"parsed from parts"}]}}]}`))
+	}))
+	defer server.Close()
+
+	provider := &geminiProvider{apiKey: "abc", endpoint: server.URL, client: server.Client(), conversationStates: map[ConversationKey]string{}}
+	message := provider.Query("You are helpful", "hello")
+	if message.Status != http.StatusOK {
+		t.Fatalf("Query() status = %d, error = %v", message.Status, message.Error)
+	}
+	if message.Reply != "parsed from parts" {
+		t.Fatalf("Query() reply = %q, want %q", message.Reply, "parsed from parts")
 	}
 }

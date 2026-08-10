@@ -1,54 +1,52 @@
 package types
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 )
 
 type stubProvider struct {
-	name  string
-	reply string
-	err   error
+	name   string
+	reply  string
+	status int
 }
 
 func (p *stubProvider) Name() string {
 	return p.name
 }
 
-func (p *stubProvider) Query(ask string, bot *BotConfig, user *UserConfig) (string, error) {
-	if p.err != nil {
-		return "", p.err
+func (p *stubProvider) IsReady() bool {
+	return true
+}
+
+func (p *stubProvider) Query(systemPrompt string, userPrompt string) *Message {
+	return &Message{
+		Reply:  p.reply,
+		Status: p.status,
 	}
-	return p.reply, nil
 }
 
-func (p *stubProvider) Chat(ask string, bot *BotConfig, user *UserConfig) (string, error) {
-	if p.err != nil {
-		return "", p.err
+func (p *stubProvider) Chat(conversationKey ConversationKey, systemPrompt string, userPrompt string, history []ConversationMessage) *Message {
+	return &Message{
+		Reply:  p.reply,
+		Status: p.status,
 	}
-	return p.reply, nil
 }
-
-func (p *stubProvider) Conversation(bot *BotConfig, user *UserConfig) []ConversationMessage {
-	return nil
-}
-
-func (p *stubProvider) PopConversation(bot *BotConfig, user *UserConfig) []ConversationMessage {
-	return nil
-}
-
-func (p *stubProvider) ClearConversation(bot *BotConfig, user *UserConfig) {}
 
 func TestBotFallsBackWhenCurrentProviderExhaustsQuota(t *testing.T) {
+	originalProviders := PROVIDERS
+	PROVIDERS = nil
+	t.Cleanup(func() { PROVIDERS = originalProviders })
+
 	bot := &Bot{
 		Config: &BotConfig{Name: "bot"},
 		User:   &UserConfig{Name: "user"},
-		Providers: []LLMProvider{
-			&stubProvider{name: "quota-provider", err: &QuotaExceededError{Provider: "quota-provider", Cause: errors.New("quota exceeded")}},
-			&stubProvider{name: "fallback-provider", reply: "ok"},
-		},
 	}
+
+	PROVIDERS = append(PROVIDERS,
+		&stubProvider{name: "quota-provider", status: http.StatusTooManyRequests},
+		&stubProvider{name: "fallback-provider", reply: "ok", status: http.StatusOK},
+	)
 
 	msg := bot.DoQuery("hello")
 	if msg.Status != http.StatusOK {
@@ -57,26 +55,22 @@ func TestBotFallsBackWhenCurrentProviderExhaustsQuota(t *testing.T) {
 	if msg.Reply != "ok" {
 		t.Fatalf("reply = %q, want %q", msg.Reply, "ok")
 	}
-	if len(bot.readyAt) != 2 {
-		t.Fatalf("readyAt length = %d, want %d", len(bot.readyAt), 2)
-	}
-	if bot.readyAt[0] == -1 {
-		t.Fatal("expected first provider to be marked exhausted after quota error")
-	}
-	if bot.readyAt[1] != -1 {
-		t.Fatalf("expected fallback provider to remain ready, got %d", bot.readyAt[1])
-	}
 }
 
 func TestBotReturnsErrorWhenAllProvidersExhaustQuota(t *testing.T) {
+	originalProviders := PROVIDERS
+	PROVIDERS = nil
+	t.Cleanup(func() { PROVIDERS = originalProviders })
+
 	bot := &Bot{
 		Config: &BotConfig{Name: "bot"},
 		User:   &UserConfig{Name: "user"},
-		Providers: []LLMProvider{
-			&stubProvider{name: "provider-1", err: &QuotaExceededError{Provider: "provider-1", Cause: errors.New("quota exceeded")}},
-			&stubProvider{name: "provider-2", err: &QuotaExceededError{Provider: "provider-2", Cause: errors.New("quota exceeded")}},
-		},
 	}
+
+	PROVIDERS = append(PROVIDERS,
+		&stubProvider{name: "provider-1", status: http.StatusTooManyRequests},
+		&stubProvider{name: "provider-2", status: http.StatusTooManyRequests},
+	)
 
 	msg := bot.DoChat("hello")
 	if msg.Status != http.StatusTooManyRequests {

@@ -1,7 +1,6 @@
 package types
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -80,7 +79,7 @@ type Bot struct {
 	history      []ConversationMessage
 }
 
-func (c *Bot) addIteration(askTime int64, ask string, reply string) *Message {
+func (c *Bot) addIteration(askTime int64, ask string, reply string) {
 	c.history = append(c.history, ConversationMessage{
 		Name:    c.User.Name,
 		Message: ask,
@@ -145,37 +144,21 @@ func (c *Bot) DoQuery(ask string) *Message {
 		}
 	}
 
-	var lastErr error
+	var lastErr *Message
 	for i := 0; i < len(PROVIDERS); i++ {
 		provider := PROVIDERS[i]
 		if !provider.IsReady() {
 			continue
 		}
-		reply, err := provider.Query(ask, c.Config, c.User)
-		if err == nil {
-			return &Message{
-				Reply:  reply,
-				Status: http.StatusOK,
-			}
+		r := provider.Query(c.Config.Profile, ask)
+		if r.Status == http.StatusOK {
+			return r
 		}
-
-		var quotaErr *QuotaExceededError
-		if errors.As(err, &quotaErr) {
-			lastErr = err
-			continue
-		}
-
-		return &Message{
-			Status: http.StatusBadGateway,
-			Error:  fmt.Sprintf("provider %q failed: %v", provider.Name(), err),
-		}
+		lastErr = r
 	}
 
 	if lastErr != nil {
-		return &Message{
-			Status: http.StatusTooManyRequests,
-			Error:  lastErr.Error(),
-		}
+		return lastErr
 	}
 
 	return &Message{

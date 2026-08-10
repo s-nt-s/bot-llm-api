@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -11,17 +12,33 @@ import (
 	"time"
 )
 
-const geminiDefaultEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+const (
+	geminiDefaultEndpoint    = "https://generativelanguage.googleapis.com/v1beta/interactions"
+	geminiDefaultModel       = "gemini-3.6-flash"
+	geminiDefaultAPIRevision = "2026-05-20"
+)
 
 type geminiProvider struct {
-	name     string
-	apiKey   string
-	endpoint string
-	readyAt  int64
-	client   *http.Client
+	name        string
+	apiKey      string
+	apiRevision string
+	endpoint    string
+	model       string
+	readyAt     int64
+	client      *http.Client
 
 	mu                 sync.Mutex
 	conversationStates map[ConversationKey]string
+}
+
+type geminiResult struct {
+	Response struct {
+		Text string `json:"text"`
+	} `json:"response"`
+	Candidates []struct {
+		Content geminiResponseContent `json:"content"`
+	} `json:"candidates"`
+	PreviousInteractionID string `json:"previous_interaction_id"`
 }
 
 type GeminiMessage struct {
@@ -29,6 +46,37 @@ type GeminiMessage struct {
 	Status                int    `json:"status"`
 	Error                 string `json:"error,omitempty"`
 	PreviousInteractionID string `json:"previousInteractionID,omitempty"`
+}
+
+type geminiResponsePart struct {
+	Text string `json:"text"`
+}
+
+type geminiResponseContent struct {
+	Parts []geminiResponsePart `json:"parts"`
+}
+
+func (c *geminiResponseContent) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+
+	type payload struct {
+		Parts []geminiResponsePart `json:"parts"`
+	}
+	var obj payload
+	if err := json.Unmarshal(data, &obj); err == nil {
+		c.Parts = obj.Parts
+		return nil
+	}
+
+	var parts []geminiResponsePart
+	if err := json.Unmarshal(data, &parts); err == nil {
+		c.Parts = parts
+		return nil
+	}
+
+	return fmt.Errorf("unmarshal gemini content")
 }
 
 func (p *geminiProvider) IsReady() bool {
@@ -60,7 +108,7 @@ func (p *geminiProvider) Query(
 	return &Message{
 		Reply:  r.Reply,
 		Status: r.Status,
-		Error: r.Error,
+		Error:  r.Error,
 	}
 }
 
@@ -71,13 +119,14 @@ func (p *geminiProvider) Chat(
 	history []ConversationMessage,
 ) *Message {
 	previousInteractionId := p.previousInteractionID(conversationKey)
-	if previousInteractionId == "" && len(history) > 0 {
-		systemPrompt = systemPrompt + "\n\nPrevious conversation:\n"
-		for i := 0; i < len(history); i++ {
-			systemPrompt = systemPrompt + "\n**" + history[i].Name + "**: " + history[i].Message
-		}
-	}
-	r := p.ask(systemPrompt, userPrompt, previousInteractionId)
+	input := p.buildInteractionInput(
+		conversationKey,
+		history,
+		userPrompt,
+		previousInteractionId == "",
+	)
+
+	r := p.ask(systemPrompt, input, previousInteractionId)
 
 	if r.PreviousInteractionID != "" {
 		p.storePreviousInteractionID(conversationKey, r.PreviousInteractionID)
@@ -85,8 +134,45 @@ func (p *geminiProvider) Chat(
 	return &Message{
 		Reply:  r.Reply,
 		Status: r.Status,
-		Error: r.Error,
+		Error:  r.Error,
 	}
+}
+
+func (p *geminiProvider) buildInteractionInput(
+	conversationKey ConversationKey,
+	history []ConversationMessage,
+	userPrompt string,
+	includeHistory bool,
+) any {
+	if !includeHistory || len(history) == 0 {
+		return userPrompt
+	}
+
+	input := make([]map[string]any, 0, len(history)+1)
+	for _, msg := range history {
+		typeName := "user_input"
+		switch msg.Name {
+		case conversationKey.userName:
+			typeName = "user_input"
+		case conversationKey.botName:
+			typeName = "model_output"
+		}
+		input = append(input, map[string]any{
+			"type": typeName,
+			"content": []map[string]any{{
+				"type": "text",
+				"text": msg.Message,
+			}},
+		})
+	}
+	input = append(input, map[string]any{
+		"type": "user_input",
+		"content": []map[string]any{{
+			"type": "text",
+			"text": userPrompt,
+		}},
+	})
+	return input
 }
 
 func (p *geminiProvider) exhausted() {
@@ -94,59 +180,62 @@ func (p *geminiProvider) exhausted() {
 	p.conversationStates = map[ConversationKey]string{}
 }
 
-func (p *geminiProvider) ask(systemPrompt string, userPrompt string, previousInteractionId string) GeminiMessage {
-	r := p._ask(systemPrompt, userPrompt, previousInteractionId)
+func (p *geminiProvider) ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
+	r := p._ask(systemPrompt, input, previousInteractionId)
 	if r.Status != http.StatusOK {
 		p.exhausted()
 	}
 	return r
 }
 
-func (p *geminiProvider) _ask(systemPrompt string, userPrompt string, previousInteractionId string) GeminiMessage {
+func (p *geminiProvider) post(payload map[string]any) (*http.Response, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gemini request: %w", err)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		p.endpoint,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create gemini request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", p.apiKey)
+	req.Header.Set("Api-Revision", p.apiRevision)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini request failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (p *geminiProvider) _ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
 	if p == nil {
 		return GeminiMessage{
 			Status: http.StatusBadGateway,
-			Error: "gemini provider is not configured",
+			Error:  "gemini provider is not configured",
 		}
 	}
 
 	payload := map[string]any{
-		"contents": []map[string]any{{
-			"parts": []map[string]any{{"text": userPrompt}},
-		}},
+		"model": p.model,
+		"input": input,
 	}
 	if systemPrompt != "" {
-		payload["system_instruction"] = map[string]any{
-			"parts": []map[string]any{{"text": systemPrompt}},
-		}
+		payload["system_instruction"] = systemPrompt
 	}
 	if previousInteractionId != "" {
 		payload["previous_interaction_id"] = previousInteractionId
 	}
-
-	body, err := json.Marshal(payload)
+	resp, err := p.post(payload)
 	if err != nil {
 		return GeminiMessage{
 			Status: http.StatusBadGateway,
-			Error: fmt.Errorf("marshal gemini request: %w", err).Error()
-		}
-	}
-
-	url := fmt.Sprintf("%s?key=%s", p.endpoint, p.apiKey)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error: fmt.Errorf("create gemini request: %w", err).Error()
-		}
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error: fmt.Errorf("gemini request failed: %w", err).Error()
+			Error:  err.Error(),
 		}
 	}
 	defer resp.Body.Close()
@@ -154,39 +243,58 @@ func (p *geminiProvider) _ask(systemPrompt string, userPrompt string, previousIn
 	if resp.StatusCode >= http.StatusBadRequest {
 		return GeminiMessage{
 			Status: http.StatusBadGateway,
-			Error: fmt.Errorf("gemini API returned status %d", resp.StatusCode).Error()
+			Error:  fmt.Errorf("gemini API returned status %d", resp.StatusCode).Error(),
 		}
 	}
 
-	var result struct {
-		Response struct {
-			Text string `json:"text"`
-		} `json:"response"`
-		PreviousInteractionID string `json:"previous_interaction_id"`
-	}
+	var result geminiResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return GeminiMessage{
 			Status: http.StatusBadGateway,
-			Error: fmt.Errorf("decode gemini response: %w", err).Error()
+			Error:  fmt.Errorf("decode gemini response: %w", err).Error(),
 		}
 	}
 
+	reply := getReply(result)
+	fmt.Printf("Gemini response: %q\n", reply)
+
 	return GeminiMessage{
-		Status: http.StatusOK,
-		Reply: strings.TrimSpace(result.Response.Text),
+		Status:                http.StatusOK,
+		Reply:                 reply,
 		PreviousInteractionID: result.PreviousInteractionID,
 	}
 }
 
+func getReply(result geminiResult) string {
+	reply := strings.TrimSpace(result.Response.Text)
+	if reply != "" {
+		return reply
+	}
+	for _, candidate := range result.Candidates {
+		for _, part := range candidate.Content.Parts {
+			reply = strings.TrimSpace(part.Text)
+			if reply != "" {
+				return reply
+			}
+		}
+	}
+	return ""
+}
+
 func init() {
-	for _, apiKey := range parseGeminiAPIKeys() {
-		RegisterProvider(&geminiProvider{
+	for i, apiKey := range parseGeminiAPIKeys() {
+		g := geminiProvider{
 			apiKey:             apiKey,
+			apiRevision:        geminiDefaultAPIRevision,
 			client:             http.DefaultClient,
 			endpoint:           geminiDefaultEndpoint,
+			model:              geminiDefaultModel,
 			readyAt:            -1,
 			conversationStates: map[ConversationKey]string{},
-		})
+		}
+		g.name = fmt.Sprintf("%s (%d)", g.model, i+1)
+		log.Printf("registering Gemini provider: %s", g.name)
+		RegisterProvider(&g)
 	}
 }
 
