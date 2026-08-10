@@ -88,6 +88,12 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ask, err := readAsk(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	bot, err := types.NewBot(pathParts[0])
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -96,12 +102,6 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	userSlug := pathParts[2]
 	user := types.NewOptionalUser(bot, userSlug)
-
-	ask, err := readAsk(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 
 	resp := getResponse(endpoint, bot, user, ask)
 	if resp == nil {
