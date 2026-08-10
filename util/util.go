@@ -2,8 +2,10 @@ package util
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -83,4 +85,23 @@ func GetEnvList(key string) []string {
 		}
 	}
 	return keys
+}
+
+func GetEnv(key string, defaultValue string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+func GetTime() *time.Time {
+	tz := GetEnv("TIMEZONE", "UTC")
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		fmt.Printf("Error loading location %s: %v\n", tz, err)
+		return nil
+	}
+	now := time.Now().In(loc)
+	return &now
 }

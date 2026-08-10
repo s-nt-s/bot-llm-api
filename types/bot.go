@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bot-api/util"
 	"fmt"
 	"net/http"
 	"sync"
@@ -106,6 +107,25 @@ func (c *Bot) addIteration(askTime int64, ask string, reply string) {
 	})
 }
 
+func (c *Bot) GetSystemPrompt() string {
+	tm := util.GetTime()
+	systemPrompt := c.Config.Profile
+	if tm != nil {
+		systemPrompt = fmt.Sprintf(
+			"Current date and time: %s\nTimezone: %s",
+			tm.Format(time.RFC1123),
+			tm.Location().String(),
+		) + "\n\n" + systemPrompt
+	}
+	if c.User != nil && c.User.Name != "" {
+		systemPrompt = systemPrompt + "\n\n" + fmt.Sprintf(
+			"User name: %s",
+			c.User.Name,
+		)
+	}
+	return systemPrompt
+}
+
 func (c *Bot) DoChat(ask string) *Message {
 	if c == nil {
 		return &Message{Status: http.StatusBadGateway, Error: "bot is nil"}
@@ -129,7 +149,7 @@ func (c *Bot) DoChat(ask string) *Message {
 	if c.User != nil {
 		conversationKey.userName = c.User.Name
 	}
-	systemPrompt := c.Config.Profile
+	systemPrompt := c.GetSystemPrompt()
 	userPrompt := ask
 	if c.chatProvider != nil && *c.chatProvider != nil {
 		pr := (*c.chatProvider)
@@ -187,13 +207,14 @@ func (c *Bot) DoQuery(ask string) *Message {
 		}
 	}
 
+	systemPrompt := c.GetSystemPrompt()
 	var lastErr *Message
 	for i := 0; i < len(PROVIDERS); i++ {
 		provider := PROVIDERS[i]
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
-		r := provider.Query(c.Config.Profile, ask)
+		r := provider.Query(systemPrompt, ask)
 		if r == nil {
 			lastErr = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
 			continue
