@@ -80,3 +80,30 @@ func TestBotReturnsErrorWhenAllProvidersExhaustQuota(t *testing.T) {
 		t.Fatal("expected error message when all providers are exhausted")
 	}
 }
+
+func TestBotDoChatHandlesMissingUser(t *testing.T) {
+	originalProviders := PROVIDERS
+	PROVIDERS = nil
+	t.Cleanup(func() { PROVIDERS = originalProviders })
+
+	PROVIDERS = append(PROVIDERS, &stubProvider{name: "provider", reply: "ok", status: http.StatusOK})
+
+	bot := &Bot{
+		Config: &BotConfig{Name: "bot", Profile: "You are helpful"},
+		User:   nil,
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("DoChat panicked: %v", r)
+		}
+	}()
+
+	msg := bot.DoChat("hello")
+	if msg.Status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", msg.Status, http.StatusOK)
+	}
+	if msg.Reply != "ok" {
+		t.Fatalf("reply = %q, want %q", msg.Reply, "ok")
+	}
+}

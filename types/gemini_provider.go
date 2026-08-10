@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -38,7 +39,9 @@ type geminiResult struct {
 	Candidates []struct {
 		Content geminiResponseContent `json:"content"`
 	} `json:"candidates"`
-	PreviousInteractionID string `json:"previous_interaction_id"`
+	Steps                 []geminiResponseStep `json:"steps"`
+	ID                    string               `json:"id"`
+	PreviousInteractionID string               `json:"previous_interaction_id"`
 }
 
 type GeminiMessage struct {
@@ -49,11 +52,22 @@ type GeminiMessage struct {
 }
 
 type geminiResponsePart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type geminiResponseTextItem struct {
+	Type string `json:"type"`
 	Text string `json:"text"`
 }
 
 type geminiResponseContent struct {
 	Parts []geminiResponsePart `json:"parts"`
+}
+
+type geminiResponseStep struct {
+	Type    string                   `json:"type"`
+	Content []geminiResponseTextItem `json:"content"`
 }
 
 func (c *geminiResponseContent) UnmarshalJSON(data []byte) error {
@@ -193,6 +207,7 @@ func (p *geminiProvider) post(payload map[string]any) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal gemini request: %w", err)
 	}
+	//log.Printf("[gemini] request endpoint=%s payload=%s", p.endpoint, string(body))
 
 	req, err := http.NewRequest(
 		http.MethodPost,
@@ -240,28 +255,42 @@ func (p *geminiProvider) _ask(systemPrompt string, input any, previousInteractio
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return GeminiMessage{
+			Status: http.StatusBadGateway,
+			Error:  fmt.Errorf("read gemini response body: %w", err).Error(),
+		}
+	}
+	//log.Printf("[gemini] response status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+
 	if resp.StatusCode >= http.StatusBadRequest {
 		return GeminiMessage{
 			Status: http.StatusBadGateway,
-			Error:  fmt.Errorf("gemini API returned status %d", resp.StatusCode).Error(),
+			Error:  fmt.Errorf("gemini API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes))).Error(),
 		}
 	}
 
 	var result geminiResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return GeminiMessage{
 			Status: http.StatusBadGateway,
-			Error:  fmt.Errorf("decode gemini response: %w", err).Error(),
+			Error:  fmt.Errorf("decode gemini response: %w; body=%s", err, strings.TrimSpace(string(bodyBytes))).Error(),
 		}
 	}
 
 	reply := getReply(result)
-	fmt.Printf("Gemini response: %q\n", reply)
+	//fmt.Printf("Gemini response: %q\n", reply)
+
+	previousID := result.PreviousInteractionID
+	if previousID == "" {
+		previousID = result.ID
+	}
 
 	return GeminiMessage{
 		Status:                http.StatusOK,
 		Reply:                 reply,
-		PreviousInteractionID: result.PreviousInteractionID,
+		PreviousInteractionID: previousID,
 	}
 }
 
@@ -270,11 +299,23 @@ func getReply(result geminiResult) string {
 	if reply != "" {
 		return reply
 	}
+
 	for _, candidate := range result.Candidates {
 		for _, part := range candidate.Content.Parts {
 			reply = strings.TrimSpace(part.Text)
 			if reply != "" {
 				return reply
+			}
+		}
+	}
+
+	for i := len(result.Steps) - 1; i >= 0; i-- {
+		step := result.Steps[i]
+		if step.Type == "model_output" {
+			for _, content := range step.Content {
+				if content.Type == "text" {
+					return strings.TrimSpace(content.Text)
+				}
 			}
 		}
 	}

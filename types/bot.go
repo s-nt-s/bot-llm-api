@@ -80,19 +80,37 @@ type Bot struct {
 }
 
 func (c *Bot) addIteration(askTime int64, ask string, reply string) {
+	if c == nil {
+		return
+	}
+
+	botName := ""
+	if c.Config != nil {
+		botName = c.Config.Name
+	}
+
+	userName := ""
+	if c.User != nil {
+		userName = c.User.Name
+	}
+
 	c.history = append(c.history, ConversationMessage{
-		Name:    c.User.Name,
+		Name:    userName,
 		Message: ask,
 		Time:    askTime,
 	})
 	c.history = append(c.history, ConversationMessage{
-		Name:    c.Config.Name,
+		Name:    botName,
 		Message: reply,
 		Time:    time.Now().Unix(),
 	})
 }
 
 func (c *Bot) DoChat(ask string) *Message {
+	if c == nil {
+		return &Message{Status: http.StatusBadGateway, Error: "bot is nil"}
+	}
+
 	askTime := time.Now().Unix()
 	if len(PROVIDERS) == 0 {
 		return &Message{
@@ -100,13 +118,25 @@ func (c *Bot) DoChat(ask string) *Message {
 			Error:  "no LLM providers configured",
 		}
 	}
-	conversationKey := ConversationKey{botName: c.Config.Name, userName: c.User.Name}
+	if c.Config == nil {
+		return &Message{
+			Status: http.StatusBadRequest,
+			Error:  "bot configuration is missing",
+		}
+	}
+
+	conversationKey := ConversationKey{botName: c.Config.Name}
+	if c.User != nil {
+		conversationKey.userName = c.User.Name
+	}
 	systemPrompt := c.Config.Profile
 	userPrompt := ask
-	if c.chatProvider != nil {
+	if c.chatProvider != nil && *c.chatProvider != nil {
 		pr := (*c.chatProvider)
 		r := pr.Chat(conversationKey, systemPrompt, userPrompt, c.history)
-		if r.Status == http.StatusOK {
+		if r == nil {
+			c.chatProvider = nil
+		} else if r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
 			return r
 		}
@@ -115,13 +145,20 @@ func (c *Bot) DoChat(ask string) *Message {
 	var lastErr *Message = nil
 	for i := 0; i < len(PROVIDERS); i++ {
 		provider := PROVIDERS[i]
-		if !provider.IsReady() {
+		if provider == nil || !provider.IsReady() {
 			continue
 		}
 		r := provider.Chat(conversationKey, systemPrompt, userPrompt, c.history)
+		if r == nil {
+			lastErr = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
+			continue
+		}
 		if r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
 			return r
+		}
+		if r.Error == "" {
+			r.Error = fmt.Sprintf("provider %q failed with status %d", provider.Name(), r.Status)
 		}
 		lastErr = r
 	}
@@ -137,6 +174,12 @@ func (c *Bot) DoChat(ask string) *Message {
 }
 
 func (c *Bot) DoQuery(ask string) *Message {
+	if c == nil {
+		return &Message{Status: http.StatusBadGateway, Error: "bot is nil"}
+	}
+	if c.Config == nil {
+		return &Message{Status: http.StatusBadRequest, Error: "bot configuration is missing"}
+	}
 	if len(PROVIDERS) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
@@ -147,12 +190,19 @@ func (c *Bot) DoQuery(ask string) *Message {
 	var lastErr *Message
 	for i := 0; i < len(PROVIDERS); i++ {
 		provider := PROVIDERS[i]
-		if !provider.IsReady() {
+		if provider == nil || !provider.IsReady() {
 			continue
 		}
 		r := provider.Query(c.Config.Profile, ask)
+		if r == nil {
+			lastErr = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
+			continue
+		}
 		if r.Status == http.StatusOK {
 			return r
+		}
+		if r.Error == "" {
+			r.Error = fmt.Sprintf("provider %q failed with status %d", provider.Name(), r.Status)
 		}
 		lastErr = r
 	}
