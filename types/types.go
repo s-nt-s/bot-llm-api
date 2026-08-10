@@ -80,3 +80,11 @@ func NewUser(bot *BotConfig, user string) (*UserConfig, error) {
 	}
 	return config, nil
 }
+
+func NewOptionalUser(bot *BotConfig, user string) *UserConfig {
+	userConfig, err := NewUser(bot, user)
+	if err != nil {
+		return nil
+	}
+	return userConfig
+}

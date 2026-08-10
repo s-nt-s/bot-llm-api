@@ -95,11 +95,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userSlug := pathParts[2]
-	user, err := types.NewUser(bot, userSlug)
-	if userSlug != "" && err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+	user := types.NewOptionalUser(bot, userSlug)
 
 	ask, err := readAsk(r)
 	if err != nil {
