@@ -96,7 +96,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	userSlug := pathParts[2]
 	user, err := types.NewUser(bot, userSlug)
-	if (userSlug != "" || endpoint == EndpointTypeChat) && err != nil {
+	if userSlug != "" && err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
