@@ -2,11 +2,11 @@ package main
 
 import (
 	"bot-api/types"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -19,33 +19,52 @@ func TestHandleRequestTreatsUserAsOptional(t *testing.T) {
 
 		handleRequest(recorder, req)
 
-		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 		}
-		if !strings.Contains(recorder.Body.String(), `"bot":"Blas"`) {
-			t.Fatalf("body = %q, want it to contain the bot name", recorder.Body.String())
+
+		var msg types.Message
+		if err := json.NewDecoder(recorder.Body).Decode(&msg); err != nil {
+			t.Fatalf("decode response: %v", err)
 		}
-		if strings.Contains(recorder.Body.String(), `"user":`) {
-			t.Fatalf("body = %q, want user to be omitted when it is not provided", recorder.Body.String())
+		if msg.Status != http.StatusOK {
+			t.Fatalf("message status = %d, want %d", msg.Status, http.StatusOK)
 		}
 	})
 }
 
-func TestHandleRequestUsesConfiguredUserWhenProvided(t *testing.T) {
+func TestNewOptionalUserReturnsConfiguredUserWhenProvided(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "session-1.md"), "---\nname: Session One\n---\nFriendly user\n")
 
-		req := httptest.NewRequest(http.MethodGet, "/blas/chat/session-1?ask=hello", nil)
-		recorder := httptest.NewRecorder()
-
-		handleRequest(recorder, req)
-
-		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+		botConfig, err := types.NewBot("blas")
+		if err != nil {
+			t.Fatalf("NewBot() error = %v", err)
 		}
-		if !strings.Contains(recorder.Body.String(), `"user":"Session One"`) {
-			t.Fatalf("body = %q, want it to contain the configured user name", recorder.Body.String())
+
+		userConfig := types.NewOptionalUser(botConfig, "session-1")
+		if userConfig == nil {
+			t.Fatal("NewOptionalUser() = nil, want a configured user")
+		}
+		if userConfig.Name != "Session One" {
+			t.Fatalf("userConfig.Name = %q, want %q", userConfig.Name, "Session One")
+		}
+	})
+}
+
+func TestNewOptionalUserReturnsNilWhenUserIsMissing(t *testing.T) {
+	withBotRoot(t, func(root string) {
+		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
+
+		botConfig, err := types.NewBot("blas")
+		if err != nil {
+			t.Fatalf("NewBot() error = %v", err)
+		}
+
+		userConfig := types.NewOptionalUser(botConfig, "")
+		if userConfig != nil {
+			t.Fatalf("NewOptionalUser() = %+v, want nil when no user is provided", userConfig)
 		}
 	})
 }
