@@ -10,10 +10,19 @@ import (
 // LLMProvider defines the minimal interface any LLM backend must implement.
 // Query and Chat can have different internal implementations, but the bot pool uses
 // the same fallback and quota-handling flow for both.
+type ConversationMessage struct {
+	Name    string `json:"name"`
+	Message string `json:"message"`
+	Time    int64  `json:"time"`
+}
+
 type LLMProvider interface {
 	Name() string
 	Query(ask string, bot *BotConfig, user *UserConfig) (string, error)
 	Chat(ask string, bot *BotConfig, user *UserConfig) (string, error)
+	Conversation(bot *BotConfig, user *UserConfig) []ConversationMessage
+	ClearConversation(bot *BotConfig, user *UserConfig)
+	PopConversation(bot *BotConfig, user *UserConfig) []ConversationMessage
 }
 
 // QuotaExceededError is returned when a provider refuses the request due to quota exhaustion.
@@ -75,19 +84,12 @@ type Bot struct {
 	Config *BotConfig
 	User   *UserConfig
 
-	Providers      []LLMProvider
-	activeProvider int
+	Providers     []LLMProvider
+	queryProvider int
+	chatProvider  int
 }
 
 func (c *Bot) DoChat(ask string) *Message {
-	return c.ask(ask, "chat")
-}
-
-func (c *Bot) DoQuery(md string) *Message {
-	return c.ask(md, "query")
-}
-
-func (c *Bot) ask(ask string, mode string) *Message {
 	if len(c.Providers) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
@@ -97,20 +99,11 @@ func (c *Bot) ask(ask string, mode string) *Message {
 
 	var lastErr error
 	for i := 0; i < len(c.Providers); i++ {
-		providerIndex := (c.activeProvider + i) % len(c.Providers)
+		providerIndex := (c.chatProvider + i) % len(c.Providers)
 		provider := c.Providers[providerIndex]
-
-		var (
-			reply string
-			err   error
-		)
-		if mode == "chat" {
-			reply, err = provider.Chat(ask, c.Config, c.User)
-		} else {
-			reply, err = provider.Query(ask, c.Config, c.User)
-		}
+		reply, err := provider.Chat(ask, c.Config, c.User)
 		if err == nil {
-			c.activeProvider = providerIndex
+			c.chatProvider = providerIndex
 			return &Message{
 				Reply:  reply,
 				Status: http.StatusOK,
@@ -123,7 +116,54 @@ func (c *Bot) ask(ask string, mode string) *Message {
 			continue
 		}
 
-		c.activeProvider = providerIndex
+		c.chatProvider = providerIndex
+		return &Message{
+			Status: http.StatusBadGateway,
+			Error:  fmt.Sprintf("provider %q failed: %v", provider.Name(), err),
+		}
+	}
+
+	if lastErr != nil {
+		return &Message{
+			Status: http.StatusTooManyRequests,
+			Error:  lastErr.Error(),
+		}
+	}
+
+	return &Message{
+		Status: http.StatusBadGateway,
+		Error:  "all providers failed",
+	}
+}
+
+func (c *Bot) DoQuery(ask string) *Message {
+	if len(c.Providers) == 0 {
+		return &Message{
+			Status: http.StatusServiceUnavailable,
+			Error:  "no LLM providers configured",
+		}
+	}
+
+	var lastErr error
+	for i := 0; i < len(c.Providers); i++ {
+		providerIndex := (c.queryProvider + i) % len(c.Providers)
+		provider := c.Providers[providerIndex]
+		reply, err := provider.Query(ask, c.Config, c.User)
+		if err == nil {
+			c.queryProvider = providerIndex
+			return &Message{
+				Reply:  reply,
+				Status: http.StatusOK,
+			}
+		}
+
+		var quotaErr *QuotaExceededError
+		if errors.As(err, &quotaErr) {
+			lastErr = err
+			continue
+		}
+
+		c.queryProvider = providerIndex
 		return &Message{
 			Status: http.StatusBadGateway,
 			Error:  fmt.Sprintf("provider %q failed: %v", provider.Name(), err),

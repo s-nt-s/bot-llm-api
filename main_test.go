@@ -34,6 +34,16 @@ func (p *stubProvider) Chat(ask string, bot *types.BotConfig, user *types.UserCo
 	return p.reply, nil
 }
 
+func (p *stubProvider) Conversation(bot *types.BotConfig, user *types.UserConfig) []types.ConversationMessage {
+	return nil
+}
+
+func (p *stubProvider) PopConversation(bot *types.BotConfig, user *types.UserConfig) []types.ConversationMessage {
+	return nil
+}
+
+func (p *stubProvider) ClearConversation(bot *types.BotConfig, user *types.UserConfig) {}
+
 func TestHandleRequestTreatsUserAsOptional(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
