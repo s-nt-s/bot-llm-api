@@ -3,6 +3,7 @@ package types
 import (
 	"bot-api/util"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -165,6 +166,7 @@ func (c *Bot) DoChat(ask string) *Message {
 		r := pr.Chat(conversationKey, systemPrompt, userPrompt, c.history)
 		if r == nil {
 			c.chatProvider = nil
+			log.Printf("provider %q returned no response, falling back to other providers", pr.Name())
 		} else if r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
 			return r
@@ -178,16 +180,14 @@ func (c *Bot) DoChat(ask string) *Message {
 			continue
 		}
 		r := provider.Chat(conversationKey, systemPrompt, userPrompt, c.history)
-		if r == nil {
-			lastErr = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
-			continue
-		}
-		if r.Status == http.StatusOK {
+
+		if r != nil && r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
 			return r
 		}
-		if r.Error == "" {
-			r.Error = fmt.Sprintf("provider %q failed with status %d", provider.Name(), r.Status)
+		log.Printf("provider %q returned no response, falling back to other providers", provider.Name())
+		if r == nil {
+			r = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
 		}
 		lastErr = r
 	}
@@ -224,16 +224,13 @@ func (c *Bot) DoQuery(ask string) *Message {
 			continue
 		}
 		r := provider.Query(systemPrompt, ask)
-		if r == nil {
-			lastErr = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
-			continue
-		}
-		if r.Status == http.StatusOK {
+		if r != nil && r.Status == http.StatusOK {
 			return r
 		}
-		if r.Error == "" {
-			r.Error = fmt.Sprintf("provider %q failed with status %d", provider.Name(), r.Status)
+		if r == nil {
+			r = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
 		}
+		log.Printf("provider %q returned no response, falling back to other providers", provider.Name())
 		lastErr = r
 	}
 
