@@ -67,3 +67,20 @@ func extractFrontMatter(data []byte) ([]byte, []byte) {
 
 	return nil, content
 }
+
+func GetEnvList(key string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return []string{}
+	}
+
+	parts := strings.Fields(value)
+	keys := make([]string, 0, len(parts))
+	for _, part := range parts {
+		key := strings.TrimSpace(part)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}

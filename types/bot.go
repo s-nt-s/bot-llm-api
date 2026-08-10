@@ -8,9 +8,12 @@ import (
 )
 
 // LLMProvider defines the minimal interface any LLM backend must implement.
+// Query and Chat can have different internal implementations, but the bot pool uses
+// the same fallback and quota-handling flow for both.
 type LLMProvider interface {
 	Name() string
-	Ask(ask string, bot *BotConfig, user *UserConfig) (string, error)
+	Query(ask string, bot *BotConfig, user *UserConfig) (string, error)
+	Chat(ask string, bot *BotConfig, user *UserConfig) (string, error)
 }
 
 // QuotaExceededError is returned when a provider refuses the request due to quota exhaustion.
@@ -77,14 +80,14 @@ type Bot struct {
 }
 
 func (c *Bot) DoChat(ask string) *Message {
-	return c.ask(ask)
+	return c.ask(ask, "chat")
 }
 
 func (c *Bot) DoQuery(md string) *Message {
-	return c.ask(md)
+	return c.ask(md, "query")
 }
 
-func (c *Bot) ask(ask string) *Message {
+func (c *Bot) ask(ask string, mode string) *Message {
 	if len(c.Providers) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
@@ -97,7 +100,15 @@ func (c *Bot) ask(ask string) *Message {
 		providerIndex := (c.activeProvider + i) % len(c.Providers)
 		provider := c.Providers[providerIndex]
 
-		reply, err := provider.Ask(ask, c.Config, c.User)
+		var (
+			reply string
+			err   error
+		)
+		if mode == "chat" {
+			reply, err = provider.Chat(ask, c.Config, c.User)
+		} else {
+			reply, err = provider.Query(ask, c.Config, c.User)
+		}
 		if err == nil {
 			c.activeProvider = providerIndex
 			return &Message{

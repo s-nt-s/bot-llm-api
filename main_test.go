@@ -20,7 +20,14 @@ func (p *stubProvider) Name() string {
 	return p.name
 }
 
-func (p *stubProvider) Ask(ask string, bot *types.BotConfig, user *types.UserConfig) (string, error) {
+func (p *stubProvider) Query(ask string, bot *types.BotConfig, user *types.UserConfig) (string, error) {
+	if p.err != nil {
+		return "", p.err
+	}
+	return p.reply, nil
+}
+
+func (p *stubProvider) Chat(ask string, bot *types.BotConfig, user *types.UserConfig) (string, error) {
 	if p.err != nil {
 		return "", p.err
 	}
