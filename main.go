@@ -119,20 +119,16 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func getResponse(endpoint EndpointType, bot *types.BotConfig, user *types.UserConfig, ask string) *types.Message {
+	botManager := &types.Bot{
+		Config: bot,
+		User:   user,
+	}
 	if endpoint == EndpointTypeQuery {
-		return doQuery(bot, user, ask)
+		return botManager.DoQuery(ask)
 	}
 	if endpoint == EndpointTypeChat {
-		return doChat(bot, user, ask)
+		return botManager.DoChat(ask)
 	}
-	return nil
-}
-
-func doChat(bot *types.BotConfig, user *types.UserConfig, ask string) *types.Message {
-	return nil
-}
-
-func doQuery(bot *types.BotConfig, user *types.UserConfig, ask string) *types.Message {
 	return nil
 }
 

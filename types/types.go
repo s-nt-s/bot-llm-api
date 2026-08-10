@@ -16,16 +16,6 @@ type BotConfig struct {
 	Profile string `yaml:"profile"`
 }
 
-func (c BotConfig) SetPath(path string) BotConfig {
-	c.Path = path
-	return c
-}
-
-func (c BotConfig) SetMarkdown(md string) BotConfig {
-	c.Profile = md
-	return c
-}
-
 type UserConfig struct {
 	File    string `yaml:"file"`
 	Path    string `yaml:"path"`
