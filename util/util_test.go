@@ -31,15 +31,15 @@ func TestLoadMarkYamlReadsMarkdownFrontMatter(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	config, err := LoadMarkYaml[markdownConfig](configPath)
+	config, markdownContent, err := LoadMarkYaml[markdownConfig](configPath)
 	if err != nil {
 		t.Fatalf("LoadMarkYaml() error = %v", err)
 	}
-	if config.Path != configPath {
-		t.Fatalf("Path = %q, want %q", config.Path, configPath)
+	if config.Path != "" {
+		t.Fatalf("Path = %q, want empty value because the loader does not set it automatically", config.Path)
 	}
-	if config.Content != "# Heading\nBody content\n" {
-		t.Fatalf("Content = %q, want markdown body", config.Content)
+	if markdownContent != "# Heading\nBody content\n" {
+		t.Fatalf("Markdown content = %q, want %q", markdownContent, "# Heading\nBody content\n")
 	}
 	if config.Name != "Example" {
 		t.Fatalf("Name = %q, want %q", config.Name, "Example")
