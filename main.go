@@ -108,19 +108,19 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := getResponse(endpoint, bot, user, ask)
-	if resp != nil {
-		writeJSON(w, resp.Status, resp)
+	if resp == nil {
+		if user == nil {
+			user = &types.UserConfig{}
+		}
+		writeJSON(w, http.StatusNotFound, response{
+			Bot:  bot.Name,
+			User: user.Name,
+			Ask:  ask,
+		})
 		return
 	}
-
-	if user == nil {
-		user = &types.UserConfig{}
-	}
-	writeJSON(w, http.StatusOK, response{
-		Bot:  bot.Name,
-		User: user.Name,
-		Ask:  ask,
-	})
+	writeJSON(w, resp.Status, resp)
+	return
 }
 
 func getResponse(endpoint EndpointType, bot *types.BotConfig, user *types.UserConfig, ask string) *types.Message {
@@ -128,7 +128,7 @@ func getResponse(endpoint EndpointType, bot *types.BotConfig, user *types.UserCo
 		return doQuery(bot, user, ask)
 	}
 	if endpoint == EndpointTypeChat {
-		return doQuery(bot, user, ask)
+		return doChat(bot, user, ask)
 	}
 	return nil
 }

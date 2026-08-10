@@ -10,13 +10,25 @@ import (
 const botDirectory = "bot"
 
 type BotConfig struct {
-	File    string `yaml:"file"`
+	Path    string `yaml:"path"`
+	Content string `yaml:"content"`
 	Name    string `yaml:"name"`
 	Profile string `yaml:"profile"`
 }
 
+func (c BotConfig) SetPath(path string) BotConfig {
+	c.Path = path
+	return c
+}
+
+func (c BotConfig) SetMarkdown(md string) BotConfig {
+	c.Profile = md
+	return c
+}
+
 type UserConfig struct {
 	File    string `yaml:"file"`
+	Path    string `yaml:"path"`
 	Name    string `yaml:"name"`
 	Profile string `yaml:"profile"`
 }
@@ -31,18 +43,20 @@ func NewBot(bot string) (*BotConfig, error) {
 	if bot == "" {
 		return nil, errors.New("empty bot")
 	}
-	configPath := filepath.Join(botDirectory, bot, "0.yaml")
-	config, err := util.LoadYaml[BotConfig](configPath)
+	configPath := filepath.Join(botDirectory, bot, "_.md")
+	config, md, err := util.LoadMarkYaml[BotConfig](configPath)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(config.Name) == "" {
+	config.Path = configPath
+	config.Profile = strings.TrimSpace(md)
+	config.Name = strings.TrimSpace(config.Name)
+	if config.Name == "" {
 		return nil, errors.New("bot configuration requires a non-empty name")
 	}
-	if strings.TrimSpace(config.Profile) == "" {
+	if config.Profile == "" {
 		return nil, errors.New("bot configuration requires a non-empty profile")
 	}
-	config.File = configPath
 	return config, nil
 }
 
@@ -50,17 +64,19 @@ func NewUser(bot *BotConfig, user string) (*UserConfig, error) {
 	if user == "" {
 		return nil, errors.New("empty user")
 	}
-	configPath := filepath.Join(filepath.Dir(bot.File), user+".yaml")
-	config, err := util.LoadYaml[UserConfig](configPath)
+	configPath := filepath.Join(filepath.Dir(bot.Path), user+".md")
+	config, md, err := util.LoadMarkYaml[UserConfig](configPath)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(config.Name) == "" {
+	config.Path = configPath
+	config.Profile = strings.TrimSpace(md)
+	config.Name = strings.TrimSpace(config.Name)
+	if config.Name == "" {
 		return nil, errors.New("user configuration requires a non-empty name")
 	}
-	if strings.TrimSpace(config.Profile) == "" {
+	if config.Profile == "" {
 		return nil, errors.New("user configuration requires a non-empty profile")
 	}
-	config.File = configPath
 	return config, nil
 }
