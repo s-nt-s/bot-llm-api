@@ -11,46 +11,38 @@ import (
 )
 
 type stubProvider struct {
-	name  string
-	reply string
-	err   error
+	name   string
+	reply  string
+	status int
 }
 
 func (p *stubProvider) Name() string {
 	return p.name
 }
 
-func (p *stubProvider) Query(ask string, bot *types.BotConfig, user *types.UserConfig) (string, error) {
-	if p.err != nil {
-		return "", p.err
+func (p *stubProvider) IsReady() bool {
+	return true
+}
+
+func (p *stubProvider) Query(systemPrompt string, userPrompt string) *types.Message {
+	return &types.Message{
+		Reply:  p.reply,
+		Status: p.status,
 	}
-	return p.reply, nil
 }
 
-func (p *stubProvider) Chat(ask string, bot *types.BotConfig, user *types.UserConfig) (string, error) {
-	if p.err != nil {
-		return "", p.err
+func (p *stubProvider) Chat(conversationKey types.ConversationKey, systemPrompt string, userPrompt string, history []types.ConversationMessage) *types.Message {
+	return &types.Message{
+		Reply:  p.reply,
+		Status: p.status,
 	}
-	return p.reply, nil
 }
-
-func (p *stubProvider) Conversation(bot *types.BotConfig, user *types.UserConfig) []types.ConversationMessage {
-	return nil
-}
-
-func (p *stubProvider) PopConversation(bot *types.BotConfig, user *types.UserConfig) []types.ConversationMessage {
-	return nil
-}
-
-func (p *stubProvider) ClearConversation(bot *types.BotConfig, user *types.UserConfig) {}
 
 func TestHandleRequestTreatsUserAsOptional(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 
-		types.RegisterProvider("test-provider", func() types.LLMProvider {
-			return &stubProvider{name: "test-provider", reply: "ok"}
-		})
+		types.RegisterProvider(&stubProvider{name: "test-provider", reply: "ok", status: http.StatusOK})
 		t.Cleanup(func() {
 			types.UnregisterProvider("test-provider")
 		})

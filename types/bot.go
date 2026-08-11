@@ -72,6 +72,17 @@ func (r *providerRegistry) register(provider LLMProvider) {
 	r.providers = append(r.providers, provider)
 }
 
+func (r *providerRegistry) unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, provider := range r.providers {
+		if provider != nil && provider.Name() == name {
+			r.providers = append(r.providers[:i], r.providers[i+1:]...)
+			return
+		}
+	}
+}
+
 func (r *providerRegistry) snapshot() []LLMProvider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -81,13 +92,29 @@ func (r *providerRegistry) snapshot() []LLMProvider {
 	return snapshot
 }
 
-var (
-	providers = &providerRegistry{}
-	botCache  = &botCacheStore{bots: make(map[ConversationKey]*Bot)}
+const (
+	defaultBotHistoryMaxMessages = 100
+	defaultBotCacheMaxEntries    = 1000
 )
+
+var (
+	providers             = &providerRegistry{}
+	botCache              = &botCacheStore{bots: make(map[ConversationKey]*Bot)}
+	botHistoryMaxMessages int
+	botCacheMaxEntries    int
+)
+
+func init() {
+	botHistoryMaxMessages = util.GetEnvInt("BOT_HISTORY_MAX_MESSAGES", defaultBotHistoryMaxMessages)
+	botCacheMaxEntries = util.GetEnvInt("BOT_CACHE_MAX_ENTRIES", defaultBotCacheMaxEntries)
+}
 
 func RegisterProvider(provider LLMProvider) {
 	providers.register(provider)
+}
+
+func UnregisterProvider(name string) {
+	providers.unregister(name)
 }
 
 func providersSnapshot() []LLMProvider {
@@ -103,8 +130,9 @@ type Bot struct {
 }
 
 type botCacheStore struct {
-	mu   sync.RWMutex
-	bots map[ConversationKey]*Bot
+	mu    sync.RWMutex
+	bots  map[ConversationKey]*Bot
+	order []ConversationKey
 }
 
 func (c *botCacheStore) get(config *BotConfig, user *UserConfig) *Bot {
@@ -128,7 +156,18 @@ func (c *botCacheStore) get(config *BotConfig, user *UserConfig) *Bot {
 		Config: config,
 		User:   user,
 	}
+
+	if len(c.bots)+1 > botCacheMaxEntries {
+		if len(c.order) > 0 {
+			oldest := c.order[0]
+			delete(c.bots, oldest)
+			c.order = c.order[1:]
+			log.Printf("Evicting bot cache entry for %v to enforce max %d entries", oldest, botCacheMaxEntries)
+		}
+	}
+
 	c.bots[k] = bot
+	c.order = append(c.order, k)
 	return bot
 }
 
@@ -161,6 +200,12 @@ func (c *Bot) addIteration(askTime int64, ask string, reply string) {
 		Message: reply,
 		Time:    time.Now().Unix(),
 	})
+
+	if botHistoryMaxMessages > 0 && len(c.history) > botHistoryMaxMessages {
+		excess := len(c.history) - botHistoryMaxMessages
+		c.history = c.history[excess:]
+		log.Printf("Truncating history for bot=%q user=%q from %d to %d messages", botName, userName, len(c.history)+excess, len(c.history))
+	}
 }
 
 func (c *Bot) GetSystemPrompt() string {
@@ -174,7 +219,7 @@ func (c *Bot) GetSystemPrompt() string {
 		"{{USER_NAME}}": "desconocido",
 	}
 	systemPrompt := c.Config.Profile
-	if c.User != nil  {
+	if c.User != nil {
 		if c.User.Profile != "" {
 			systemPrompt = systemPrompt + "\n\n" + c.User.Profile
 		}

@@ -3,10 +3,10 @@ package main
 import (
 	"bot-api/types"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -88,9 +88,10 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ask, err := readAsk(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	values := getValues(r)
+	ask := values.Get("ask")
+	if ask == "" {
+		writeError(w, http.StatusBadRequest, "ask is required and cannot be empty")
 		return
 	}
 
@@ -129,33 +130,26 @@ func getResponse(endpoint EndpointType, bot *types.BotConfig, user *types.UserCo
 	return nil
 }
 
-func readAsk(r *http.Request) (string, error) {
+func getValues(r *http.Request) url.Values {
 	if r.Method == http.MethodGet {
-		if ask := strings.TrimSpace(r.URL.Query().Get("ask")); ask != "" {
-			return ask, nil
-		}
-		return "", errors.New("ask is required and cannot be empty")
+		return r.URL.Query()
 	}
+	if err := r.ParseForm(); err == nil {
+		return r.Form
+	}
+	/*
+		contentType := strings.ToLower(strings.Split(r.Header.Get("Content-Type"), ";")[0])
+		if contentType != "application/json" {
+			return url.Values{}
+		}
 
-	contentType := strings.ToLower(strings.Split(r.Header.Get("Content-Type"), ";")[0])
-	if contentType == "application/json" {
-		var body request
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			return "", errors.New("the JSON body is invalid")
+			log.Println(errors.New("the JSON body is invalid"))
+			return url.Values{}
 		}
-		if ask := strings.TrimSpace(body.Ask); ask != "" {
-			return ask, nil
-		}
-		return "", errors.New("ask is required and cannot be empty")
-	}
-
-	if err := r.ParseForm(); err != nil {
-		return "", errors.New("the form is invalid")
-	}
-	if ask := strings.TrimSpace(r.Form.Get("ask")); ask != "" {
-		return ask, nil
-	}
-	return "", errors.New("ask is required and cannot be empty")
+	*/
+	return url.Values{}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

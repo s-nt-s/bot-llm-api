@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,6 +94,18 @@ func GetEnv(key string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func GetEnvInt(key string, defaultValue int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return defaultValue
+	}
+	return parsed
 }
 
 func GetTime() time.Time {
