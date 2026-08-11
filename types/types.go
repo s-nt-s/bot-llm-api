@@ -29,7 +29,7 @@ type Message struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func NewBot(bot string) (*BotConfig, error) {
+func NewBotConfig(bot string) (*BotConfig, error) {
 	if bot == "" {
 		return nil, errors.New("empty bot")
 	}
@@ -50,7 +50,7 @@ func NewBot(bot string) (*BotConfig, error) {
 	return config, nil
 }
 
-func NewUser(bot *BotConfig, user string) (*UserConfig, error) {
+func NewUserConfig(bot *BotConfig, user string) (*UserConfig, error) {
 	if user == "" {
 		return nil, errors.New("empty user")
 	}
@@ -75,7 +75,7 @@ func NewOptionalUser(bot *BotConfig, user string) *UserConfig {
 	if user == "" {
 		return nil
 	}
-	userConfig, err := NewUser(bot, user)
+	userConfig, err := NewUserConfig(bot, user)
 	if err != nil {
 		return &UserConfig{
 			Name: user,

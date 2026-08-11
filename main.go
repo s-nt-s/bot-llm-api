@@ -94,7 +94,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bot, err := types.NewBot(pathParts[0])
+	bot, err := types.NewBotConfig(pathParts[0])
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -119,10 +119,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func getResponse(endpoint EndpointType, bot *types.BotConfig, user *types.UserConfig, ask string) *types.Message {
-	botManager := &types.Bot{
-		Config: bot,
-		User:   user,
-	}
+	botManager := types.GetBot(bot, user)
 	if endpoint == EndpointTypeQuery {
 		return botManager.DoQuery(ask)
 	}

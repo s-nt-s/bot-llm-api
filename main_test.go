@@ -79,9 +79,9 @@ func TestNewOptionalUserReturnsConfiguredUserWhenProvided(t *testing.T) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "session-1.md"), "---\nname: Session One\n---\nFriendly user\n")
 
-		botConfig, err := types.NewBot("blas")
+		botConfig, err := types.NewBotConfig("blas")
 		if err != nil {
-			t.Fatalf("NewBot() error = %v", err)
+			t.Fatalf("NewBotConfig() error = %v", err)
 		}
 
 		userConfig := types.NewOptionalUser(botConfig, "session-1")
@@ -98,9 +98,9 @@ func TestNewOptionalUserReturnsNilWhenUserIsMissing(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 
-		botConfig, err := types.NewBot("blas")
+		botConfig, err := types.NewBotConfig("blas")
 		if err != nil {
-			t.Fatalf("NewBot() error = %v", err)
+			t.Fatalf("NewBotConfig() error = %v", err)
 		}
 
 		userConfig := types.NewOptionalUser(botConfig, "")
@@ -114,9 +114,9 @@ func TestNewBotLoadsMarkdownFrontMatter(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 
-		config, err := types.NewBot("blas")
+		config, err := types.NewBotConfig("blas")
 		if err != nil {
-			t.Fatalf("NewBot() error = %v", err)
+			t.Fatalf("NewBotConfig() error = %v", err)
 		}
 		if config.Name != "Blas" {
 			t.Fatalf("config.Name = %q, want %q", config.Name, "Blas")
@@ -132,13 +132,13 @@ func TestNewUserLoadsMarkdownFrontMatter(t *testing.T) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "session-1.md"), "---\nname: Session One\n---\nFriendly user\n")
 
-		bot, err := types.NewBot("blas")
+		bot, err := types.NewBotConfig("blas")
 		if err != nil {
-			t.Fatalf("NewBot() error = %v", err)
+			t.Fatalf("NewBotConfig() error = %v", err)
 		}
-		user, err := types.NewUser(bot, "session-1")
+		user, err := types.NewUserConfig(bot, "session-1")
 		if err != nil {
-			t.Fatalf("NewUser() error = %v", err)
+			t.Fatalf("NewUserConfig() error = %v", err)
 		}
 		if user.Name != "Session One" {
 			t.Fatalf("user.Name = %q, want %q", user.Name, "Session One")

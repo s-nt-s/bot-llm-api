@@ -63,7 +63,9 @@ func (e *QuotaExceededError) Unwrap() error {
 
 var (
 	providerMu sync.RWMutex
+	botsMu     sync.RWMutex
 	PROVIDERS  []LLMProvider
+	BOTS       = make(map[ConversationKey]*Bot)
 )
 
 func RegisterProvider(provider LLMProvider) {
@@ -72,13 +74,32 @@ func RegisterProvider(provider LLMProvider) {
 	PROVIDERS = append(PROVIDERS, provider)
 }
 
-// Bot keeps a shared configuration and user, and can try multiple LLM providers in order.
 type Bot struct {
 	Config *BotConfig
 	User   *UserConfig
 
 	chatProvider *LLMProvider
 	history      []ConversationMessage
+}
+
+func GetBot(config *BotConfig, user *UserConfig) *Bot {
+	botsMu.Lock()
+	defer botsMu.Unlock()
+	k := ConversationKey{botName: config.Name}
+	if user != nil {
+		k.userName = user.Name
+	}
+	bot, ok := BOTS[k]
+	if ok {
+		bot.Config = config
+		bot.User = user
+		return bot
+	}
+	BOTS[k] = &Bot{
+		Config: config,
+		User:   user,
+	}
+	return bot
 }
 
 func (c *Bot) addIteration(askTime int64, ask string, reply string) {
