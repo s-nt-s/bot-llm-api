@@ -34,16 +34,16 @@ func (p *stubProvider) Chat(conversationKey ConversationKey, systemPrompt string
 }
 
 func TestBotFallsBackWhenCurrentProviderExhaustsQuota(t *testing.T) {
-	originalProviders := PROVIDERS
-	PROVIDERS = nil
-	t.Cleanup(func() { PROVIDERS = originalProviders })
+	originalProviders := providers.providers
+	providers.providers = nil
+	t.Cleanup(func() { providers.providers = originalProviders })
 
 	bot := &Bot{
 		Config: &BotConfig{Name: "bot"},
 		User:   &UserConfig{Name: "user"},
 	}
 
-	PROVIDERS = append(PROVIDERS,
+	providers.providers = append(providers.providers,
 		&stubProvider{name: "quota-provider", status: http.StatusTooManyRequests},
 		&stubProvider{name: "fallback-provider", reply: "ok", status: http.StatusOK},
 	)
@@ -58,16 +58,16 @@ func TestBotFallsBackWhenCurrentProviderExhaustsQuota(t *testing.T) {
 }
 
 func TestBotReturnsErrorWhenAllProvidersExhaustQuota(t *testing.T) {
-	originalProviders := PROVIDERS
-	PROVIDERS = nil
-	t.Cleanup(func() { PROVIDERS = originalProviders })
+	originalProviders := providers.providers
+	providers.providers = nil
+	t.Cleanup(func() { providers.providers = originalProviders })
 
 	bot := &Bot{
 		Config: &BotConfig{Name: "bot"},
 		User:   &UserConfig{Name: "user"},
 	}
 
-	PROVIDERS = append(PROVIDERS,
+	providers.providers = append(providers.providers,
 		&stubProvider{name: "provider-1", status: http.StatusTooManyRequests},
 		&stubProvider{name: "provider-2", status: http.StatusTooManyRequests},
 	)
@@ -82,11 +82,11 @@ func TestBotReturnsErrorWhenAllProvidersExhaustQuota(t *testing.T) {
 }
 
 func TestBotDoChatHandlesMissingUser(t *testing.T) {
-	originalProviders := PROVIDERS
-	PROVIDERS = nil
-	t.Cleanup(func() { PROVIDERS = originalProviders })
+	originalProviders := providers.providers
+	providers.providers = nil
+	t.Cleanup(func() { providers.providers = originalProviders })
 
-	PROVIDERS = append(PROVIDERS, &stubProvider{name: "provider", reply: "ok", status: http.StatusOK})
+	providers.providers = append(providers.providers, &stubProvider{name: "provider", reply: "ok", status: http.StatusOK})
 
 	bot := &Bot{
 		Config: &BotConfig{Name: "bot", Profile: "You are helpful"},

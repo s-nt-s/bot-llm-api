@@ -61,26 +61,37 @@ func (e *QuotaExceededError) Unwrap() error {
 	return e.Cause
 }
 
+type providerRegistry struct {
+	mu        sync.RWMutex
+	providers []LLMProvider
+}
+
+func (r *providerRegistry) register(provider LLMProvider) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.providers = append(r.providers, provider)
+}
+
+func (r *providerRegistry) snapshot() []LLMProvider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	snapshot := make([]LLMProvider, len(r.providers))
+	copy(snapshot, r.providers)
+	return snapshot
+}
+
 var (
-	providerMu sync.RWMutex
-	botsMu     sync.RWMutex
-	PROVIDERS  []LLMProvider
-	BOTS       = make(map[ConversationKey]*Bot)
+	providers = &providerRegistry{}
+	botCache  = &botCacheStore{bots: make(map[ConversationKey]*Bot)}
 )
 
 func RegisterProvider(provider LLMProvider) {
-	providerMu.Lock()
-	defer providerMu.Unlock()
-	PROVIDERS = append(PROVIDERS, provider)
+	providers.register(provider)
 }
 
 func providersSnapshot() []LLMProvider {
-	providerMu.RLock()
-	defer providerMu.RUnlock()
-
-	snapshot := make([]LLMProvider, len(PROVIDERS))
-	copy(snapshot, PROVIDERS)
-	return snapshot
+	return providers.snapshot()
 }
 
 type Bot struct {
@@ -91,27 +102,38 @@ type Bot struct {
 	history      []ConversationMessage
 }
 
-func GetBot(config *BotConfig, user *UserConfig) *Bot {
+type botCacheStore struct {
+	mu   sync.RWMutex
+	bots map[ConversationKey]*Bot
+}
+
+func (c *botCacheStore) get(config *BotConfig, user *UserConfig) *Bot {
 	k := ConversationKey{botName: config.Name}
 	if user != nil {
 		k.userName = user.Name
 	}
 
-	botsMu.Lock()
-	defer botsMu.Unlock()
-	bot, ok := BOTS[k]
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	bot, ok := c.bots[k]
 	if ok {
+		log.Printf("Reuse bot for %v", k)
 		bot.Config = config
 		bot.User = user
 		return bot
 	}
 
+	log.Printf("New bot for %v", k)
 	bot = &Bot{
 		Config: config,
 		User:   user,
 	}
-	BOTS[k] = bot
+	c.bots[k] = bot
 	return bot
+}
+
+func GetBot(config *BotConfig, user *UserConfig) *Bot {
+	return botCache.get(config, user)
 }
 
 func (c *Bot) addIteration(askTime int64, ask string, reply string) {
