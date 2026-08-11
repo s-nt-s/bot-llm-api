@@ -165,29 +165,27 @@ func (c *Bot) addIteration(askTime int64, ask string, reply string) {
 
 func (c *Bot) GetSystemPrompt() string {
 	tm := util.GetTime()
-	systemPrompt := c.Config.Profile
-	if tm != nil {
-		systemPrompt = fmt.Sprintf(
-			"Current date and time: %s\nTimezone: %s",
+	rplc := map[string]string{
+		"{{CURRENT_DATE_TIME}}": fmt.Sprintf(
+			"%s (%s)",
 			tm.Format(time.RFC1123),
 			tm.Location().String(),
-		) + "\n\n" + systemPrompt
+		),
+		"{{USER_NAME}}": "desconocido",
 	}
-	if c.User != nil {
-		if c.User.Name != "" {
-			systemPrompt = systemPrompt + "\n\n" + fmt.Sprintf(
-				"User name: %s",
-				c.User.Name,
-			)
-		}
+	systemPrompt := c.Config.Profile
+	if c.User != nil  {
 		if c.User.Profile != "" {
-			systemPrompt = systemPrompt + "\n\n" + fmt.Sprintf(
-				"User profile: %s",
-				c.User.Profile,
-			)
+			systemPrompt = systemPrompt + "\n\n" + c.User.Profile
 		}
-
+		if c.User.Name != "" {
+			rplc["{{USER_NAME}}"] = c.User.Name
+		}
 	}
+	systemPrompt = util.Rpl(
+		systemPrompt,
+		rplc,
+	)
 	return systemPrompt
 }
 

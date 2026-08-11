@@ -95,13 +95,19 @@ func GetEnv(key string, defaultValue string) string {
 	return value
 }
 
-func GetTime() *time.Time {
+func GetTime() time.Time {
 	tz := GetEnv("TIMEZONE", "UTC")
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		fmt.Printf("Error loading location %s: %v\n", tz, err)
-		return nil
+		panic(fmt.Sprintf("Error loading location %s: %v\n", tz, err))
 	}
 	now := time.Now().In(loc)
-	return &now
+	return now
+}
+
+func Rpl(s string, kv map[string]string) string {
+	for k, v := range kv {
+		s = strings.ReplaceAll(s, k, v)
+	}
+	return s
 }
