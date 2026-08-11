@@ -74,6 +74,15 @@ func RegisterProvider(provider LLMProvider) {
 	PROVIDERS = append(PROVIDERS, provider)
 }
 
+func providersSnapshot() []LLMProvider {
+	providerMu.RLock()
+	defer providerMu.RUnlock()
+
+	snapshot := make([]LLMProvider, len(PROVIDERS))
+	copy(snapshot, PROVIDERS)
+	return snapshot
+}
+
 type Bot struct {
 	Config *BotConfig
 	User   *UserConfig
@@ -83,22 +92,25 @@ type Bot struct {
 }
 
 func GetBot(config *BotConfig, user *UserConfig) *Bot {
-	botsMu.Lock()
-	defer botsMu.Unlock()
 	k := ConversationKey{botName: config.Name}
 	if user != nil {
 		k.userName = user.Name
 	}
+
+	botsMu.Lock()
+	defer botsMu.Unlock()
 	bot, ok := BOTS[k]
 	if ok {
 		bot.Config = config
 		bot.User = user
 		return bot
 	}
-	BOTS[k] = &Bot{
+
+	bot = &Bot{
 		Config: config,
 		User:   user,
 	}
+	BOTS[k] = bot
 	return bot
 }
 
@@ -163,7 +175,8 @@ func (c *Bot) DoChat(ask string) *Message {
 	}
 
 	askTime := time.Now().Unix()
-	if len(PROVIDERS) == 0 {
+	providers := providersSnapshot()
+	if len(providers) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
 			Error:  "no LLM providers configured",
@@ -195,8 +208,7 @@ func (c *Bot) DoChat(ask string) *Message {
 	}
 	c.chatProvider = nil
 	var lastErr *Message = nil
-	for i := 0; i < len(PROVIDERS); i++ {
-		provider := PROVIDERS[i]
+	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
@@ -206,10 +218,12 @@ func (c *Bot) DoChat(ask string) *Message {
 			c.addIteration(askTime, ask, r.Reply)
 			return r
 		}
-		log.Printf("provider %q returned no response, falling back to other providers", provider.Name())
 		if r == nil {
 			r = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
+		} else if r.Error == "" {
+			r.Error = fmt.Sprintf("provider %q returned status %d", provider.Name(), r.Status)
 		}
+		log.Printf("provider %q returned no response, falling back to other providers", provider.Name())
 		lastErr = r
 	}
 
@@ -230,7 +244,8 @@ func (c *Bot) DoQuery(ask string) *Message {
 	if c.Config == nil {
 		return &Message{Status: http.StatusBadRequest, Error: "bot configuration is missing"}
 	}
-	if len(PROVIDERS) == 0 {
+	providers := providersSnapshot()
+	if len(providers) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,
 			Error:  "no LLM providers configured",
@@ -239,8 +254,7 @@ func (c *Bot) DoQuery(ask string) *Message {
 
 	systemPrompt := c.GetSystemPrompt()
 	var lastErr *Message
-	for i := 0; i < len(PROVIDERS); i++ {
-		provider := PROVIDERS[i]
+	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
