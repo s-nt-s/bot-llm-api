@@ -1,7 +1,9 @@
 package main
 
 import (
-	"bot-api/types"
+	"bot-api/internal/bot"
+	"bot-api/internal/config"
+	"bot-api/internal/httpapi"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,15 +26,15 @@ func (p *stubProvider) IsReady() bool {
 	return true
 }
 
-func (p *stubProvider) Query(systemPrompt string, userPrompt string) *types.Message {
-	return &types.Message{
+func (p *stubProvider) Query(systemPrompt string, userPrompt string) *config.Message {
+	return &config.Message{
 		Reply:  p.reply,
 		Status: p.status,
 	}
 }
 
-func (p *stubProvider) Chat(conversationKey types.ConversationKey, systemPrompt string, userPrompt string, history []types.ConversationMessage) *types.Message {
-	return &types.Message{
+func (p *stubProvider) Chat(conversationKey bot.ConversationKey, systemPrompt string, userPrompt string, history []bot.ConversationMessage) *config.Message {
+	return &config.Message{
 		Reply:  p.reply,
 		Status: p.status,
 	}
@@ -42,21 +44,21 @@ func TestHandleRequestTreatsUserAsOptional(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 
-		types.RegisterProvider(&stubProvider{name: "test-provider", reply: "ok", status: http.StatusOK})
+		bot.RegisterProvider(&stubProvider{name: "test-provider", reply: "ok", status: http.StatusOK})
 		t.Cleanup(func() {
-			types.UnregisterProvider("test-provider")
+			bot.UnregisterProvider("test-provider")
 		})
 
 		req := httptest.NewRequest(http.MethodGet, "/blas/query?ask=hello", nil)
 		recorder := httptest.NewRecorder()
 
-		handleRequest(recorder, req)
+		httpapi.HandleRequest(recorder, req)
 
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 		}
 
-		var msg types.Message
+		var msg config.Message
 		if err := json.NewDecoder(recorder.Body).Decode(&msg); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
@@ -71,12 +73,12 @@ func TestNewOptionalUserReturnsConfiguredUserWhenProvided(t *testing.T) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "session-1.md"), "---\nname: Session One\n---\nFriendly user\n")
 
-		botConfig, err := types.NewBotConfig("blas")
+		botConfig, err := config.NewBotConfig("blas")
 		if err != nil {
 			t.Fatalf("NewBotConfig() error = %v", err)
 		}
 
-		userConfig := types.NewOptionalUser(botConfig, "session-1")
+		userConfig := config.NewOptionalUser(botConfig, "session-1")
 		if userConfig == nil {
 			t.Fatal("NewOptionalUser() = nil, want a configured user")
 		}
@@ -90,12 +92,12 @@ func TestNewOptionalUserReturnsNilWhenUserIsMissing(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 
-		botConfig, err := types.NewBotConfig("blas")
+		botConfig, err := config.NewBotConfig("blas")
 		if err != nil {
 			t.Fatalf("NewBotConfig() error = %v", err)
 		}
 
-		userConfig := types.NewOptionalUser(botConfig, "")
+		userConfig := config.NewOptionalUser(botConfig, "")
 		if userConfig != nil {
 			t.Fatalf("NewOptionalUser() = %+v, want nil when no user is provided", userConfig)
 		}
@@ -106,15 +108,15 @@ func TestNewBotLoadsMarkdownFrontMatter(t *testing.T) {
 	withBotRoot(t, func(root string) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 
-		config, err := types.NewBotConfig("blas")
+		configItem, err := config.NewBotConfig("blas")
 		if err != nil {
 			t.Fatalf("NewBotConfig() error = %v", err)
 		}
-		if config.Name != "Blas" {
-			t.Fatalf("config.Name = %q, want %q", config.Name, "Blas")
+		if configItem.Name != "Blas" {
+			t.Fatalf("configItem.Name = %q, want %q", configItem.Name, "Blas")
 		}
-		if config.Profile != "Helpful bot" {
-			t.Fatalf("config.Profile = %q, want %q", config.Profile, "Helpful bot")
+		if configItem.Profile != "Helpful bot" {
+			t.Fatalf("configItem.Profile = %q, want %q", configItem.Profile, "Helpful bot")
 		}
 	})
 }
@@ -124,11 +126,11 @@ func TestNewUserLoadsMarkdownFrontMatter(t *testing.T) {
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "_.md"), "---\nname: Blas\n---\nHelpful bot\n")
 		writeMarkdownConfig(t, filepath.Join(root, "bot", "blas", "session-1.md"), "---\nname: Session One\n---\nFriendly user\n")
 
-		bot, err := types.NewBotConfig("blas")
+		botConfig, err := config.NewBotConfig("blas")
 		if err != nil {
 			t.Fatalf("NewBotConfig() error = %v", err)
 		}
-		user, err := types.NewUserConfig(bot, "session-1")
+		user, err := config.NewUserConfig(botConfig, "session-1")
 		if err != nil {
 			t.Fatalf("NewUserConfig() error = %v", err)
 		}

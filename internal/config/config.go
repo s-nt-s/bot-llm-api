@@ -1,13 +1,13 @@
-package types
+package config
 
 import (
-	"bot-api/util"
+	"bot-api/common"
 	"errors"
 	"path/filepath"
 	"strings"
 )
 
-const botDirectory = "bot"
+const BotDirectory = "bot"
 
 type BotConfig struct {
 	Path    string `yaml:"path"`
@@ -33,8 +33,8 @@ func NewBotConfig(bot string) (*BotConfig, error) {
 	if bot == "" {
 		return nil, errors.New("empty bot")
 	}
-	configPath := filepath.Join(botDirectory, bot, "_.md")
-	config, md, err := util.LoadMarkYaml[BotConfig](configPath)
+	configPath := filepath.Join(BotDirectory, bot, "_.md")
+	config, md, err := common.LoadMarkYaml[BotConfig](configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func NewUserConfig(bot *BotConfig, user string) (*UserConfig, error) {
 		return nil, errors.New("empty user")
 	}
 	configPath := filepath.Join(filepath.Dir(bot.Path), user+".md")
-	config, md, err := util.LoadMarkYaml[UserConfig](configPath)
+	config, md, err := common.LoadMarkYaml[UserConfig](configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +77,7 @@ func NewOptionalUser(bot *BotConfig, user string) *UserConfig {
 	}
 	userConfig, err := NewUserConfig(bot, user)
 	if err != nil {
-		return &UserConfig{
-			Name: user,
-		}
+		return &UserConfig{Name: user}
 	}
 	return userConfig
 }

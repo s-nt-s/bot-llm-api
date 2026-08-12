@@ -1,7 +1,8 @@
-package types
+package bot
 
 import (
-	"bot-api/util"
+	"bot-api/internal/config"
+	"bot-api/common"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,8 +11,18 @@ import (
 )
 
 // LLMProvider defines the minimal interface any LLM backend must implement.
-// Query and Chat can have different internal implementations, but the bot pool uses
-// the same fallback and quota-handling flow for both.
+type LLMProvider interface {
+	Name() string
+	IsReady() bool
+	Query(systemPrompt string, userPrompt string) *config.Message
+	Chat(
+		conversationKey ConversationKey,
+		systemPrompt string,
+		userPrompt string,
+		history []ConversationMessage,
+	) *config.Message
+}
+
 type ConversationMessage struct {
 	Name    string `json:"name"`
 	Message string `json:"message"`
@@ -19,46 +30,8 @@ type ConversationMessage struct {
 }
 
 type ConversationKey struct {
-	botName  string
-	userName string
-}
-
-type LLMProvider interface {
-	Name() string
-	IsReady() bool
-	Query(
-		systemPrompt string,
-		userPrompt string,
-	) *Message
-	Chat(
-		conversationKey ConversationKey,
-		systemPrompt string,
-		userPrompt string,
-		history []ConversationMessage,
-	) *Message
-}
-
-// QuotaExceededError is returned when a provider refuses the request due to quota exhaustion.
-type QuotaExceededError struct {
-	Provider string
-	Cause    error
-}
-
-func (e *QuotaExceededError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if e.Cause == nil {
-		return fmt.Sprintf("provider %q exhausted its quota", e.Provider)
-	}
-	return fmt.Sprintf("provider %q exhausted its quota: %v", e.Provider, e.Cause)
-}
-
-func (e *QuotaExceededError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
+	BotName  string
+	UserName string
 }
 
 type providerRegistry struct {
@@ -122,8 +95,8 @@ var (
 )
 
 func init() {
-	botHistoryMaxMessages = util.GetEnvInt("BOT_HISTORY_MAX_MESSAGES", defaultBotHistoryMaxMessages)
-	botCacheMaxEntries = util.GetEnvInt("BOT_CACHE_MAX_ENTRIES", defaultBotCacheMaxEntries)
+	botHistoryMaxMessages = common.GetEnvInt("BOT_HISTORY_MAX_MESSAGES", defaultBotHistoryMaxMessages)
+	botCacheMaxEntries = common.GetEnvInt("BOT_CACHE_MAX_ENTRIES", defaultBotCacheMaxEntries)
 }
 
 func RegisterProvider(provider LLMProvider) {
@@ -134,13 +107,13 @@ func UnregisterProvider(name string) {
 	providers.unregister(name)
 }
 
-func providersSnapshot(current *LLMProvider) []LLMProvider {
+func ProvidersSnapshot(current *LLMProvider) []LLMProvider {
 	return providers.snapshot(current)
 }
 
 type Bot struct {
-	Config *BotConfig
-	User   *UserConfig
+	Config *config.BotConfig
+	User   *config.UserConfig
 
 	chatProvider *LLMProvider
 	history      []ConversationMessage
@@ -152,27 +125,24 @@ type botCacheStore struct {
 	order []ConversationKey
 }
 
-func (c *botCacheStore) get(config *BotConfig, user *UserConfig) *Bot {
-	k := ConversationKey{botName: config.Name}
+func (c *botCacheStore) get(configItem *config.BotConfig, user *config.UserConfig) *Bot {
+	k := ConversationKey{BotName: configItem.Name}
 	if user != nil {
-		k.userName = user.Name
+		k.UserName = user.Name
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	bot, ok := c.bots[k]
+	botItem, ok := c.bots[k]
 	if ok {
 		log.Printf("Reuse bot for %v", k)
-		bot.Config = config
-		bot.User = user
-		return bot
+		botItem.Config = configItem
+		botItem.User = user
+		return botItem
 	}
 
 	log.Printf("New bot for %v", k)
-	bot = &Bot{
-		Config: config,
-		User:   user,
-	}
+	botItem = &Bot{Config: configItem, User: user}
 
 	if len(c.bots)+1 > botCacheMaxEntries {
 		if len(c.order) > 0 {
@@ -183,13 +153,13 @@ func (c *botCacheStore) get(config *BotConfig, user *UserConfig) *Bot {
 		}
 	}
 
-	c.bots[k] = bot
+	c.bots[k] = botItem
 	c.order = append(c.order, k)
-	return bot
+	return botItem
 }
 
-func GetBot(config *BotConfig, user *UserConfig) *Bot {
-	return botCache.get(config, user)
+func GetBot(configItem *config.BotConfig, user *config.UserConfig) *Bot {
+	return botCache.get(configItem, user)
 }
 
 func (c *Bot) addIteration(askTime int64, ask string, reply string) {
@@ -226,14 +196,10 @@ func (c *Bot) addIteration(askTime int64, ask string, reply string) {
 }
 
 func (c *Bot) GetSystemPrompt() string {
-	tm := util.GetTime()
+	tm := common.GetTime()
 	rplc := map[string]string{
-		"{{CURRENT_DATE_TIME}}": fmt.Sprintf(
-			"%s (%s)",
-			tm.Format(time.RFC1123),
-			tm.Location().String(),
-		),
-		"{{USER_NAME}}": "desconocido",
+		"{{CURRENT_DATE_TIME}}": fmt.Sprintf("%s (%s)", tm.Format(time.RFC1123), tm.Location().String()),
+		"{{USER_NAME}}":        "desconocido",
 	}
 	systemPrompt := c.Config.Profile
 	if c.User != nil {
@@ -244,40 +210,31 @@ func (c *Bot) GetSystemPrompt() string {
 			rplc["{{USER_NAME}}"] = c.User.Name
 		}
 	}
-	systemPrompt = util.Rpl(
-		systemPrompt,
-		rplc,
-	)
+	systemPrompt = common.Rpl(systemPrompt, rplc)
 	return systemPrompt
 }
 
-func (c *Bot) DoChat(ask string) *Message {
+func (c *Bot) DoChat(ask string) *config.Message {
 	if c == nil {
-		return &Message{Status: http.StatusBadGateway, Error: "bot is nil"}
+		return &config.Message{Status: http.StatusBadGateway, Error: "bot is nil"}
 	}
 	if c.Config == nil {
-		return &Message{
-			Status: http.StatusBadRequest,
-			Error:  "bot configuration is missing",
-		}
+		return &config.Message{Status: http.StatusBadRequest, Error: "bot configuration is missing"}
 	}
 
 	askTime := time.Now().Unix()
 
-	conversationKey := ConversationKey{botName: c.Config.Name}
+	conversationKey := ConversationKey{BotName: c.Config.Name}
 	if c.User != nil {
-		conversationKey.userName = c.User.Name
+		conversationKey.UserName = c.User.Name
 	}
-	providers := providersSnapshot(c.chatProvider)
+	providers := ProvidersSnapshot(c.chatProvider)
 	if len(providers) == 0 {
-		return &Message{
-			Status: http.StatusServiceUnavailable,
-			Error:  "no LLM providers configured",
-		}
+		return &config.Message{Status: http.StatusServiceUnavailable, Error: "no LLM providers configured"}
 	}
 	systemPrompt := c.GetSystemPrompt()
 	userPrompt := ask
-	var lastErr *Message = nil
+	var lastErr *config.Message = nil
 	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
 			continue
@@ -290,7 +247,7 @@ func (c *Bot) DoChat(ask string) *Message {
 			return r
 		}
 		if r == nil {
-			r = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
+			r = &config.Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
 		} else if r.Error == "" {
 			r.Error = fmt.Sprintf("provider %q returned status %d", provider.Name(), r.Status)
 		}
@@ -302,29 +259,23 @@ func (c *Bot) DoChat(ask string) *Message {
 		return lastErr
 	}
 
-	return &Message{
-		Status: http.StatusBadGateway,
-		Error:  "all providers failed",
-	}
+	return &config.Message{Status: http.StatusBadGateway, Error: "all providers failed"}
 }
 
-func (c *Bot) DoQuery(ask string) *Message {
+func (c *Bot) DoQuery(ask string) *config.Message {
 	if c == nil {
-		return &Message{Status: http.StatusBadGateway, Error: "bot is nil"}
+		return &config.Message{Status: http.StatusBadGateway, Error: "bot is nil"}
 	}
 	if c.Config == nil {
-		return &Message{Status: http.StatusBadRequest, Error: "bot configuration is missing"}
+		return &config.Message{Status: http.StatusBadRequest, Error: "bot configuration is missing"}
 	}
-	providers := providersSnapshot(nil)
+	providers := ProvidersSnapshot(nil)
 	if len(providers) == 0 {
-		return &Message{
-			Status: http.StatusServiceUnavailable,
-			Error:  "no LLM providers configured",
-		}
+		return &config.Message{Status: http.StatusServiceUnavailable, Error: "no LLM providers configured"}
 	}
 
 	systemPrompt := c.GetSystemPrompt()
-	var lastErr *Message
+	var lastErr *config.Message
 	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
 			continue
@@ -334,7 +285,7 @@ func (c *Bot) DoQuery(ask string) *Message {
 			return r
 		}
 		if r == nil {
-			r = &Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
+			r = &config.Message{Status: http.StatusBadGateway, Error: fmt.Sprintf("provider %q returned no response", provider.Name())}
 		}
 		log.Printf("provider %q returned no response, falling back to other providers", provider.Name())
 		lastErr = r
@@ -344,8 +295,5 @@ func (c *Bot) DoQuery(ask string) *Message {
 		return lastErr
 	}
 
-	return &Message{
-		Status: http.StatusBadGateway,
-		Error:  "all providers failed",
-	}
+	return &config.Message{Status: http.StatusBadGateway, Error: "all providers failed"}
 }

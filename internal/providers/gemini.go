@@ -1,6 +1,8 @@
-package types
+package providers
 
 import (
+	"bot-api/internal/bot"
+	"bot-api/internal/config"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -19,7 +21,7 @@ const (
 	geminiDefaultAPIRevision = "2026-05-20"
 )
 
-type geminiProvider struct {
+type GeminiProvider struct {
 	name        string
 	apiKey      string
 	apiRevision string
@@ -29,7 +31,7 @@ type geminiProvider struct {
 	client      *http.Client
 
 	mu                 sync.Mutex
-	conversationStates map[ConversationKey]string
+	conversationStates map[bot.ConversationKey]string
 }
 
 type geminiResult struct {
@@ -93,14 +95,14 @@ func (c *geminiResponseContent) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("unmarshal gemini content")
 }
 
-func (p *geminiProvider) IsReady() bool {
+func (p *GeminiProvider) IsReady() bool {
 	if p.readyAt == -1 {
 		return true
 	}
 	return time.Now().Unix() > p.readyAt
 }
 
-func (p *geminiProvider) Name() string {
+func (p *GeminiProvider) Name() string {
 	if p == nil {
 		return "gemini"
 	}
@@ -110,28 +112,25 @@ func (p *geminiProvider) Name() string {
 	return "gemini"
 }
 
-func (p *geminiProvider) Query(
-	systemPrompt string,
-	userPrompt string,
-) *Message {
+func (p *GeminiProvider) Query(systemPrompt string, userPrompt string) *config.Message {
 	r := p.ask(
 		systemPrompt,
 		userPrompt,
 		"",
 	)
-	return &Message{
+	return &config.Message{
 		Reply:  r.Reply,
 		Status: r.Status,
 		Error:  r.Error,
 	}
 }
 
-func (p *geminiProvider) Chat(
-	conversationKey ConversationKey,
+func (p *GeminiProvider) Chat(
+	conversationKey bot.ConversationKey,
 	systemPrompt string,
 	userPrompt string,
-	history []ConversationMessage,
-) *Message {
+	history []bot.ConversationMessage,
+) *config.Message {
 	previousInteractionId := p.previousInteractionID(conversationKey)
 	input := p.buildInteractionInput(
 		conversationKey,
@@ -145,16 +144,16 @@ func (p *geminiProvider) Chat(
 	if r.PreviousInteractionID != "" {
 		p.storePreviousInteractionID(conversationKey, r.PreviousInteractionID)
 	}
-	return &Message{
+	return &config.Message{
 		Reply:  r.Reply,
 		Status: r.Status,
 		Error:  r.Error,
 	}
 }
 
-func (p *geminiProvider) buildInteractionInput(
-	conversationKey ConversationKey,
-	history []ConversationMessage,
+func (p *GeminiProvider) buildInteractionInput(
+	conversationKey bot.ConversationKey,
+	history []bot.ConversationMessage,
 	userPrompt string,
 	includeHistory bool,
 ) any {
@@ -166,9 +165,9 @@ func (p *geminiProvider) buildInteractionInput(
 	for _, msg := range history {
 		typeName := "user_input"
 		switch msg.Name {
-		case conversationKey.userName:
+		case conversationKey.UserName:
 			typeName = "user_input"
-		case conversationKey.botName:
+		case conversationKey.BotName:
 			typeName = "model_output"
 		}
 		input = append(input, map[string]any{
@@ -189,12 +188,11 @@ func (p *geminiProvider) buildInteractionInput(
 	return input
 }
 
-func (p *geminiProvider) exhausted() {
+func (p *GeminiProvider) exhausted() {
 	p.readyAt = time.Now().Add(1 * time.Hour).Unix()
-	//p.conversationStates = map[ConversationKey]string{}
 }
 
-func (p *geminiProvider) ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
+func (p *GeminiProvider) ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
 	r := p._ask(systemPrompt, input, previousInteractionId)
 	if r.Status != http.StatusOK {
 		p.exhausted()
@@ -202,12 +200,11 @@ func (p *geminiProvider) ask(systemPrompt string, input any, previousInteraction
 	return r
 }
 
-func (p *geminiProvider) post(payload map[string]any) (*http.Response, error) {
+func (p *GeminiProvider) post(payload map[string]any) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal gemini request: %w", err)
 	}
-	//log.Printf("[gemini] request endpoint=%s payload=%s", p.endpoint, string(body))
 
 	req, err := http.NewRequest(
 		http.MethodPost,
@@ -228,18 +225,12 @@ func (p *geminiProvider) post(payload map[string]any) (*http.Response, error) {
 	return resp, nil
 }
 
-func (p *geminiProvider) _ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
+func (p *GeminiProvider) _ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
 	if p == nil {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error:  "gemini provider is not configured",
-		}
+		return GeminiMessage{Status: http.StatusBadGateway, Error: "gemini provider is not configured"}
 	}
 
-	payload := map[string]any{
-		"model": p.model,
-		"input": input,
-	}
+	payload := map[string]any{"model": p.model, "input": input}
 	if systemPrompt != "" {
 		payload["system_instruction"] = systemPrompt
 	}
@@ -248,50 +239,31 @@ func (p *geminiProvider) _ask(systemPrompt string, input any, previousInteractio
 	}
 	resp, err := p.post(payload)
 	if err != nil {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error:  err.Error(),
-		}
+		return GeminiMessage{Status: http.StatusBadGateway, Error: err.Error()}
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error:  fmt.Errorf("read gemini response body: %w", err).Error(),
-		}
+		return GeminiMessage{Status: http.StatusBadGateway, Error: fmt.Errorf("read gemini response body: %w", err).Error()}
 	}
-	//log.Printf("[gemini] response status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error:  fmt.Errorf("gemini API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes))).Error(),
-		}
+		return GeminiMessage{Status: http.StatusBadGateway, Error: fmt.Errorf("gemini API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes))).Error()}
 	}
 
 	var result geminiResult
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return GeminiMessage{
-			Status: http.StatusBadGateway,
-			Error:  fmt.Errorf("decode gemini response: %w; body=%s", err, strings.TrimSpace(string(bodyBytes))).Error(),
-		}
+		return GeminiMessage{Status: http.StatusBadGateway, Error: fmt.Errorf("decode gemini response: %w; body=%s", err, strings.TrimSpace(string(bodyBytes))).Error()}
 	}
 
 	reply := getReply(result)
-	//fmt.Printf("Gemini response: %q\n", reply)
-
 	previousID := result.PreviousInteractionID
 	if previousID == "" {
 		previousID = result.ID
 	}
 
-	return GeminiMessage{
-		Status:                http.StatusOK,
-		Reply:                 reply,
-		PreviousInteractionID: previousID,
-	}
+	return GeminiMessage{Status: http.StatusOK, Reply: reply, PreviousInteractionID: previousID}
 }
 
 func getReply(result geminiResult) string {
@@ -323,39 +295,23 @@ func getReply(result geminiResult) string {
 }
 
 func init() {
-	for i, apiKey := range parseGeminiAPIKeys() {
-		g := geminiProvider{
+	for i, apiKey := range common.GetEnvList("GEMINI") {
+		g := GeminiProvider{
 			apiKey:             apiKey,
 			apiRevision:        geminiDefaultAPIRevision,
 			client:             http.DefaultClient,
 			endpoint:           geminiDefaultEndpoint,
 			model:              geminiDefaultModel,
 			readyAt:            -1,
-			conversationStates: map[ConversationKey]string{},
+			conversationStates: map[bot.ConversationKey]string{},
 		}
 		g.name = fmt.Sprintf("%s (%d)", g.model, i+1)
 		log.Printf("registering Gemini provider: %s", g.name)
-		RegisterProvider(&g)
+		bot.RegisterProvider(&g)
 	}
 }
 
-func parseGeminiAPIKeys() []string {
-	value := strings.TrimSpace(os.Getenv("GEMINI"))
-	if value == "" {
-		return nil
-	}
-	parts := strings.Fields(value)
-	keys := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			keys = append(keys, part)
-		}
-	}
-	return keys
-}
-
-func (p *geminiProvider) previousInteractionID(k ConversationKey) string {
+func (p *GeminiProvider) previousInteractionID(k bot.ConversationKey) string {
 	if p == nil || p.conversationStates == nil {
 		return ""
 	}
@@ -367,7 +323,7 @@ func (p *geminiProvider) previousInteractionID(k ConversationKey) string {
 	return ""
 }
 
-func (p *geminiProvider) storePreviousInteractionID(k ConversationKey, interactionID string) {
+func (p *GeminiProvider) storePreviousInteractionID(k bot.ConversationKey, interactionID string) {
 	if p == nil || interactionID == "" {
 		return
 	}
