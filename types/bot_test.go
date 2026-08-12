@@ -128,6 +128,30 @@ func TestProviderRegistrySnapshotRotatesStartingAtCurrent(t *testing.T) {
 	}
 }
 
+func TestProviderRegistrySnapshotRotatesStartingAtNextReadyWhenCurrentNotReady(t *testing.T) {
+	originalProviders := providers.providers
+	providers.providers = nil
+	t.Cleanup(func() { providers.providers = originalProviders })
+
+	p1 := &stubProvider{name: "provider-1", ready: true}
+	p2 := &stubProvider{name: "provider-2", ready: false}
+	p3 := &stubProvider{name: "provider-3", ready: true}
+	p4 := &stubProvider{name: "provider-4", ready: true}
+	providers.providers = append(providers.providers, p1, p2, p3, p4)
+
+	current := LLMProvider(p2)
+	got := providersSnapshot(&current)
+	want := []string{"provider-3", "provider-4", "provider-1"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, provider := range got {
+		if provider.Name() != want[i] {
+			t.Fatalf("provider[%d].Name() = %q, want %q", i, provider.Name(), want[i])
+		}
+	}
+}
+
 func TestBotDoChatHandlesMissingUser(t *testing.T) {
 	originalProviders := providers.providers
 	providers.providers = nil

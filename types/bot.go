@@ -93,15 +93,15 @@ func (r *providerRegistry) snapshot(current *LLMProvider) []LLMProvider {
 		if provider == nil {
 			continue
 		}
+		if current != nil && provider == *current {
+			start = len(ready)
+		}
 		if provider.IsReady() {
 			ready = append(ready, provider)
 		}
-		if current!=nil && provider == *current {
-			start = len(ready) - 1
-		}
 	}
 
-	if len(ready) == 0 || start <= 0 {
+	if len(ready) == 0 || start <= 0 || start >= len(ready) {
 		return ready
 	}
 
@@ -268,19 +268,6 @@ func (c *Bot) DoChat(ask string) *Message {
 	if c.User != nil {
 		conversationKey.userName = c.User.Name
 	}
-	systemPrompt := c.GetSystemPrompt()
-	userPrompt := ask
-	if c.chatProvider != nil && *c.chatProvider != nil {
-		pr := (*c.chatProvider)
-		r := pr.Chat(conversationKey, systemPrompt, userPrompt, c.history)
-		if r == nil {
-			c.chatProvider = nil
-			log.Printf("provider %q returned no response, falling back to other providers", pr.Name())
-		} else if r.Status == http.StatusOK {
-			c.addIteration(askTime, ask, r.Reply)
-			return r
-		}
-	}
 	providers := providersSnapshot(c.chatProvider)
 	if len(providers) == 0 {
 		return &Message{
@@ -288,7 +275,8 @@ func (c *Bot) DoChat(ask string) *Message {
 			Error:  "no LLM providers configured",
 		}
 	}
-	c.chatProvider = nil
+	systemPrompt := c.GetSystemPrompt()
+	userPrompt := ask
 	var lastErr *Message = nil
 	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
@@ -298,6 +286,7 @@ func (c *Bot) DoChat(ask string) *Message {
 
 		if r != nil && r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
+			c.chatProvider = &provider
 			return r
 		}
 		if r == nil {
