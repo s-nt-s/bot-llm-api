@@ -191,7 +191,7 @@ func (p *geminiProvider) buildInteractionInput(
 
 func (p *geminiProvider) exhausted() {
 	p.readyAt = time.Now().Add(1 * time.Hour).Unix()
-	p.conversationStates = map[ConversationKey]string{}
+	//p.conversationStates = map[ConversationKey]string{}
 }
 
 func (p *geminiProvider) ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
