@@ -90,7 +90,7 @@ func (r *providerRegistry) snapshot(current *LLMProvider) []LLMProvider {
 	start := -1
 	ready := make([]LLMProvider, 0, len(r.providers))
 	for _, provider := range r.providers {
-		if provider != nil {
+		if provider == nil {
 			continue
 		}
 		if provider.IsReady() {
