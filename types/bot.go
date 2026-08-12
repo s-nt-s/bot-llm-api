@@ -83,13 +83,30 @@ func (r *providerRegistry) unregister(name string) {
 	}
 }
 
-func (r *providerRegistry) snapshot() []LLMProvider {
+func (r *providerRegistry) snapshot(current *LLMProvider) []LLMProvider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	snapshot := make([]LLMProvider, len(r.providers))
-	copy(snapshot, r.providers)
-	return snapshot
+	start := -1
+	ready := make([]LLMProvider, 0, len(r.providers))
+	for _, provider := range r.providers {
+		if provider != nil {
+			continue
+		}
+		if provider.IsReady() {
+			ready = append(ready, provider)
+		}
+		if provider == current {
+			start = len(ready) - 1
+		}
+	}
+
+	if len(ready) == 0 || start <= 0 {
+		return ready
+	}
+
+	rotated := append(ready[start:], ready[:start]...)
+	return rotated
 }
 
 const (
@@ -117,8 +134,8 @@ func UnregisterProvider(name string) {
 	providers.unregister(name)
 }
 
-func providersSnapshot() []LLMProvider {
-	return providers.snapshot()
+func providersSnapshot(current *LLMProvider) []LLMProvider {
+	return providers.snapshot(current)
 }
 
 type Bot struct {
@@ -238,21 +255,14 @@ func (c *Bot) DoChat(ask string) *Message {
 	if c == nil {
 		return &Message{Status: http.StatusBadGateway, Error: "bot is nil"}
 	}
-
-	askTime := time.Now().Unix()
-	providers := providersSnapshot()
-	if len(providers) == 0 {
-		return &Message{
-			Status: http.StatusServiceUnavailable,
-			Error:  "no LLM providers configured",
-		}
-	}
 	if c.Config == nil {
 		return &Message{
 			Status: http.StatusBadRequest,
 			Error:  "bot configuration is missing",
 		}
 	}
+
+	askTime := time.Now().Unix()
 
 	conversationKey := ConversationKey{botName: c.Config.Name}
 	if c.User != nil {
@@ -269,6 +279,13 @@ func (c *Bot) DoChat(ask string) *Message {
 		} else if r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
 			return r
+		}
+	}
+	providers := providersSnapshot(c.chatProvider)
+	if len(providers) == 0 {
+		return &Message{
+			Status: http.StatusServiceUnavailable,
+			Error:  "no LLM providers configured",
 		}
 	}
 	c.chatProvider = nil
@@ -309,7 +326,7 @@ func (c *Bot) DoQuery(ask string) *Message {
 	if c.Config == nil {
 		return &Message{Status: http.StatusBadRequest, Error: "bot configuration is missing"}
 	}
-	providers := providersSnapshot()
+	providers := providersSnapshot(nil)
 	if len(providers) == 0 {
 		return &Message{
 			Status: http.StatusServiceUnavailable,

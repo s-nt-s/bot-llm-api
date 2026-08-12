@@ -9,6 +9,7 @@ type stubProvider struct {
 	name   string
 	reply  string
 	status int
+	ready  bool
 }
 
 func (p *stubProvider) Name() string {
@@ -16,7 +17,7 @@ func (p *stubProvider) Name() string {
 }
 
 func (p *stubProvider) IsReady() bool {
-	return true
+	return p.ready
 }
 
 func (p *stubProvider) Query(systemPrompt string, userPrompt string) *Message {
@@ -44,8 +45,8 @@ func TestBotFallsBackWhenCurrentProviderExhaustsQuota(t *testing.T) {
 	}
 
 	providers.providers = append(providers.providers,
-		&stubProvider{name: "quota-provider", status: http.StatusTooManyRequests},
-		&stubProvider{name: "fallback-provider", reply: "ok", status: http.StatusOK},
+		&stubProvider{name: "quota-provider", status: http.StatusTooManyRequests, ready: true},
+		&stubProvider{name: "fallback-provider", reply: "ok", status: http.StatusOK, ready: true},
 	)
 
 	msg := bot.DoQuery("hello")
@@ -68,8 +69,8 @@ func TestBotReturnsErrorWhenAllProvidersExhaustQuota(t *testing.T) {
 	}
 
 	providers.providers = append(providers.providers,
-		&stubProvider{name: "provider-1", status: http.StatusTooManyRequests},
-		&stubProvider{name: "provider-2", status: http.StatusTooManyRequests},
+		&stubProvider{name: "provider-1", status: http.StatusTooManyRequests, ready: true},
+		&stubProvider{name: "provider-2", status: http.StatusTooManyRequests, ready: true},
 	)
 
 	msg := bot.DoChat("hello")
@@ -81,12 +82,58 @@ func TestBotReturnsErrorWhenAllProvidersExhaustQuota(t *testing.T) {
 	}
 }
 
+func TestProviderRegistrySnapshotOnlyReadyProviders(t *testing.T) {
+	originalProviders := providers.providers
+	providers.providers = nil
+	t.Cleanup(func() { providers.providers = originalProviders })
+
+	providers.providers = append(providers.providers,
+		&stubProvider{name: "ready-1", ready: true},
+		&stubProvider{name: "not-ready", ready: false},
+		&stubProvider{name: "ready-2", ready: true},
+	)
+
+	got := providersSnapshot(nil)
+	want := []string{"ready-1", "ready-2"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, provider := range got {
+		if provider.Name() != want[i] {
+			t.Fatalf("provider[%d].Name() = %q, want %q", i, provider.Name(), want[i])
+		}
+	}
+}
+
+func TestProviderRegistrySnapshotRotatesStartingAtCurrent(t *testing.T) {
+	originalProviders := providers.providers
+	providers.providers = nil
+	t.Cleanup(func() { providers.providers = originalProviders })
+
+	p1 := &stubProvider{name: "provider-1", ready: true}
+	p2 := &stubProvider{name: "provider-2", ready: true}
+	p3 := &stubProvider{name: "provider-3", ready: true}
+	providers.providers = append(providers.providers, p1, p2, p3)
+
+	current := LLMProvider(p2)
+	got := providersSnapshot(&current)
+	want := []string{"provider-2", "provider-3", "provider-1"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, provider := range got {
+		if provider.Name() != want[i] {
+			t.Fatalf("provider[%d].Name() = %q, want %q", i, provider.Name(), want[i])
+		}
+	}
+}
+
 func TestBotDoChatHandlesMissingUser(t *testing.T) {
 	originalProviders := providers.providers
 	providers.providers = nil
 	t.Cleanup(func() { providers.providers = originalProviders })
 
-	providers.providers = append(providers.providers, &stubProvider{name: "provider", reply: "ok", status: http.StatusOK})
+	providers.providers = append(providers.providers, &stubProvider{name: "provider", reply: "ok", status: http.StatusOK, ready: true})
 
 	bot := &Bot{
 		Config: &BotConfig{Name: "bot", Profile: "You are helpful"},
