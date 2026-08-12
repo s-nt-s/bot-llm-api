@@ -122,6 +122,7 @@ func (p *GeminiProvider) Query(systemPrompt string, userPrompt string) *config.M
 		Reply:  r.Reply,
 		Status: r.Status,
 		Error:  r.Error,
+		Model:  p.Name(),
 	}
 }
 
@@ -148,6 +149,7 @@ func (p *GeminiProvider) Chat(
 		Reply:  r.Reply,
 		Status: r.Status,
 		Error:  r.Error,
+		Model:  p.Name(),
 	}
 }
 

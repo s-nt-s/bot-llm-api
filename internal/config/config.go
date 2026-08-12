@@ -27,6 +27,7 @@ type Message struct {
 	Reply  string `json:"reply,omitempty"`
 	Status int    `json:"status"`
 	Error  string `json:"error,omitempty"`
+	Model  string `json:"model,omitempty"`
 }
 
 func NewBotConfig(bot string) (*BotConfig, error) {
