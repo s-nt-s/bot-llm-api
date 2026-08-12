@@ -96,7 +96,7 @@ func (r *providerRegistry) snapshot(current *LLMProvider) []LLMProvider {
 		if provider.IsReady() {
 			ready = append(ready, provider)
 		}
-		if provider == current {
+		if current!=nil && provider == *current {
 			start = len(ready) - 1
 		}
 	}
