@@ -3,6 +3,7 @@ package main
 import (
 	"bot-api/common"
 	"bot-api/internal/httpapi"
+	_ "bot-api/internal/providers"
 	"log"
 	"net/http"
 )
