@@ -1,8 +1,8 @@
 package bot
 
 import (
-	"bot-api/internal/config"
 	"bot-api/common"
+	"bot-api/internal/config"
 	"fmt"
 	"log"
 	"net/http"
@@ -199,7 +199,7 @@ func (c *Bot) GetSystemPrompt() string {
 	tm := common.GetTime()
 	rplc := map[string]string{
 		"{{CURRENT_DATE_TIME}}": fmt.Sprintf("%s (%s)", tm.Format(time.RFC1123), tm.Location().String()),
-		"{{USER_NAME}}":        "desconocido",
+		"{{USER_NAME}}":         "desconocido",
 	}
 	systemPrompt := c.Config.Profile
 	if c.User != nil {
@@ -214,6 +214,14 @@ func (c *Bot) GetSystemPrompt() string {
 	return systemPrompt
 }
 
+func (c *Bot) GetConversationKey() ConversationKey {
+	k := ConversationKey{BotName: c.Config.Name}
+	if c.User != nil {
+		k.UserName = c.User.Name
+	}
+	return k
+}
+
 func (c *Bot) DoChat(ask string) *config.Message {
 	if c == nil {
 		return &config.Message{Status: http.StatusBadGateway, Error: "bot is nil"}
@@ -224,10 +232,7 @@ func (c *Bot) DoChat(ask string) *config.Message {
 
 	askTime := time.Now().Unix()
 
-	conversationKey := ConversationKey{BotName: c.Config.Name}
-	if c.User != nil {
-		conversationKey.UserName = c.User.Name
-	}
+	conversationKey := c.GetConversationKey()
 	providers := ProvidersSnapshot(c.chatProvider)
 	if len(providers) == 0 {
 		return &config.Message{Status: http.StatusServiceUnavailable, Error: "no LLM providers configured"}
@@ -244,6 +249,7 @@ func (c *Bot) DoChat(ask string) *config.Message {
 		if r != nil && r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
 			c.chatProvider = &provider
+			log.Printf("%v use %s", conversationKey, provider.Name())
 			return r
 		}
 		if r == nil {
@@ -274,6 +280,7 @@ func (c *Bot) DoQuery(ask string) *config.Message {
 		return &config.Message{Status: http.StatusServiceUnavailable, Error: "no LLM providers configured"}
 	}
 
+	conversationKey := c.GetConversationKey()
 	systemPrompt := c.GetSystemPrompt()
 	var lastErr *config.Message
 	for _, provider := range providers {
@@ -282,6 +289,7 @@ func (c *Bot) DoQuery(ask string) *config.Message {
 		}
 		r := provider.Query(systemPrompt, ask)
 		if r != nil && r.Status == http.StatusOK {
+			log.Printf("%v use %s", conversationKey, provider.Name())
 			return r
 		}
 		if r == nil {
