@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"log"
 )
 
 const BotDirectory = "bot"
@@ -34,7 +35,8 @@ func NewBotConfig(bot string) (*BotConfig, error) {
 	if bot == "" {
 		return nil, errors.New("empty bot")
 	}
-	configPath := filepath.Join(BotDirectory, bot, "_.md")
+	botSlug := strings.ToLower(bot)
+	configPath := filepath.Join(BotDirectory, botSlug, "_.md")
 	config, md, err := common.LoadMarkYaml[BotConfig](configPath)
 	if err != nil {
 		return nil, err
@@ -48,6 +50,7 @@ func NewBotConfig(bot string) (*BotConfig, error) {
 	if config.Profile == "" {
 		return nil, errors.New("bot configuration requires a non-empty profile")
 	}
+	log.Printf("Loaded %s", configPath)
 	return config, nil
 }
 
@@ -55,7 +58,9 @@ func NewUserConfig(bot *BotConfig, user string) (*UserConfig, error) {
 	if user == "" {
 		return nil, errors.New("empty user")
 	}
-	configPath := filepath.Join(filepath.Dir(bot.Path), user+".md")
+	userSlug := strings.ToLower(user)
+	configPath := filepath.Join(filepath.Dir(bot.Path), userSlug+".md")
+
 	config, md, err := common.LoadMarkYaml[UserConfig](configPath)
 	if err != nil {
 		return nil, err
@@ -69,6 +74,7 @@ func NewUserConfig(bot *BotConfig, user string) (*UserConfig, error) {
 	if config.Profile == "" {
 		return nil, errors.New("user configuration requires a non-empty profile")
 	}
+	log.Printf("Loaded %s", configPath)
 	return config, nil
 }
 
@@ -78,6 +84,7 @@ func NewOptionalUser(bot *BotConfig, user string) *UserConfig {
 	}
 	userConfig, err := NewUserConfig(bot, user)
 	if err != nil {
+		log.Printf("Error loading user %s %s", user, err.Error())
 		return &UserConfig{Name: user}
 	}
 	return userConfig
