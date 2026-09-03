@@ -26,6 +26,8 @@ func (p *stubProvider) IsReady() bool {
 	return true
 }
 
+func (p *stubProvider) Close() {}
+
 func (p *stubProvider) Query(systemPrompt string, userPrompt string) *config.Message {
 	return &config.Message{
 		Reply:  p.reply,

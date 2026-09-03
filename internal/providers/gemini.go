@@ -10,6 +10,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +35,12 @@ type GeminiProvider struct {
 
 	mu                 sync.Mutex
 	conversationStates map[bot.ConversationKey]string
+}
+
+type geminiConversationState struct {
+	BotName       string `json:"botName"`
+	UserName      string `json:"userName"`
+	InteractionID string `json:"interactionID"`
 }
 
 type geminiResult struct {
@@ -308,6 +317,7 @@ func init() {
 			conversationStates: map[bot.ConversationKey]string{},
 		}
 		g.name = fmt.Sprintf("%s (%d)", g.model, i+1)
+		g.Load()
 		log.Printf("registering Gemini provider: %s", g.name)
 		bot.RegisterProvider(&g)
 	}
@@ -332,4 +342,85 @@ func (p *GeminiProvider) storePreviousInteractionID(k bot.ConversationKey, inter
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.conversationStates[k] = interactionID
+}
+
+func (p *GeminiProvider) filePathStore() string {
+	path := "data/gemini/" + p.apiKey + ".json"
+	return path
+}
+
+func (p *GeminiProvider) Close() {
+	if p == nil || p.apiKey == "" {
+		return
+	}
+	if len(p.conversationStates) == 0 {
+		return
+	}
+
+	p.mu.Lock()
+	states := make([]geminiConversationState, 0, len(p.conversationStates))
+	for key, interactionID := range p.conversationStates {
+		states = append(states, geminiConversationState{
+			BotName:       key.BotName,
+			UserName:      key.UserName,
+			InteractionID: interactionID,
+		})
+	}
+	p.mu.Unlock()
+
+	sort.Slice(states, func(i, j int) bool {
+		if states[i].BotName != states[j].BotName {
+			return states[i].BotName < states[j].BotName
+		}
+		return states[i].UserName < states[j].UserName
+	})
+
+	data, err := json.MarshalIndent(states, "", "  ")
+	if err != nil {
+		log.Printf("failed to encode Gemini conversation states: %v", err)
+		return
+	}
+	path := p.filePathStore()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		log.Printf("failed to create Gemini data directory: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		log.Printf("failed to save Gemini conversation states: %v", err)
+	}
+}
+
+func (p *GeminiProvider) Load() {
+	if p == nil || p.apiKey == "" {
+		return
+	}
+
+	data, err := os.ReadFile(p.filePathStore())
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("failed to load Gemini conversation states: %v", err)
+		}
+		return
+	}
+
+	var states []geminiConversationState
+	if err := json.Unmarshal(data, &states); err != nil {
+		log.Printf("failed to decode Gemini conversation states: %v", err)
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.conversationStates == nil {
+		p.conversationStates = make(map[bot.ConversationKey]string)
+	}
+	for _, state := range states {
+		key := bot.ConversationKey{
+			BotName:  state.BotName,
+			UserName: state.UserName,
+		}
+		if _, exists := p.conversationStates[key]; !exists {
+			p.conversationStates[key] = state.InteractionID
+		}
+	}
 }

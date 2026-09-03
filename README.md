@@ -34,6 +34,28 @@ Script de arranque (carga `.env` si existe):
 ./run.sh
 ```
 
+Instalar como servicio `systemd` (ejecutar desde la raiz del proyecto):
+
+```bash
+sudo ./install-service.sh
+```
+
+El script crea `bot-api.service`, carga explícitamente las variables de `.env` mediante `EnvironmentFile`, lo habilita para el arranque y lo inicia. El servicio ejecuta directamente `go run .`, sin depender de `run.sh`. Se pueden indicar, en este orden, el nombre del servicio, el directorio del proyecto y el usuario:
+
+```bash
+sudo ./install-service.sh bot-api /ruta/al/proyecto usuario
+```
+
+El servicio queda ordenado después de `network-online.target`. Para que systemd espere realmente a la red, el sistema debe tener habilitado el servicio `wait-online` de su gestor de red, por ejemplo `NetworkManager-wait-online.service` o `systemd-networkd-wait-online.service`.
+
+Comandos utiles:
+
+```bash
+systemctl status bot-api.service
+sudo systemctl restart bot-api.service
+sudo systemctl disable --now bot-api.service
+```
+
 ## Endpoints
 
 Rutas disponibles (manejadas en `internal/httpapi/server.go`):

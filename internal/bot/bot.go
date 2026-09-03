@@ -14,6 +14,7 @@ import (
 type LLMProvider interface {
 	Name() string
 	IsReady() bool
+	Close()
 	Query(systemPrompt string, userPrompt string) *config.Message
 	Chat(
 		conversationKey ConversationKey,
@@ -109,6 +110,16 @@ func UnregisterProvider(name string) {
 
 func ProvidersSnapshot(current *LLMProvider) []LLMProvider {
 	return providers.snapshot(current)
+}
+
+func CloseProviders() {
+	providers.mu.RLock()
+	snapshot := append([]LLMProvider(nil), providers.providers...)
+	providers.mu.RUnlock()
+
+	for _, provider := range snapshot {
+		provider.Close()
+	}
 }
 
 type Bot struct {
