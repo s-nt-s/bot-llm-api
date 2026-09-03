@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "texto_original": {
+      "type": "string",
+      "description": "Texto completo introducido por el usuario"
+    },
+    "oraciones": {
+      "type": "array",
+      "description": "Lista de oraciones identificadas en el texto",
+      "items": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Fragmento de la oración"
+          },
+          "tokens": {
+            "type": "array",
+            "description": "Lista de palabras o unidades léxicas con su análisis",
+            "items": {
+              "type": "object",
+              "properties": {
+                "palabra": {
+                  "type": "string",
+                  "description": "Token original"
+                },
+                "lema": {
+                  "type": "string",
+                  "description": "Lema o raíz de la palabra"
+                },
+                "categoria_gramatical": {
+                  "type": "string",
+                  "description": "Etiqueta POS (ej. sustantivo, verbo, adjetivo...)"
+                },
+                "rasgos_morfologicos": {
+                  "type": "object",
+                  "description": "Atributos como género, número, tiempo, modo, persona, etc.",
+                  "additionalProperties": true
+                }
+              },
+              "required": ["palabra", "categoria_gramatical"]
+            }
+          },
+          "dependencias": {
+            "type": "array",
+            "description": "Relaciones de dependencia entre tokens (índices basados en 0)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "gobernante": {
+                  "type": "integer",
+                  "description": "Índice del token que gobierna"
+                },
+                "dependiente": {
+                  "type": "integer",
+                  "description": "Índice del token dependiente"
+                },
+                "relacion": {
+                  "type": "string",
+                  "description": "Tipo de relación (sujeto, objeto, modificador, etc.)"
+                }
+              },
+              "required": ["gobernante", "dependiente", "relacion"]
+            }
+          }
+        },
+        "required": ["texto", "tokens"]
+      }
+    },
+    "errores_gramaticales": {
+      "type": "array",
+      "description": "Lista de errores o anomalías detectadas",
+      "items": {
+        "type": "object",
+        "properties": {
+          "oracion_idx": {
+            "type": "integer",
+            "description": "Índice de la oración donde ocurre"
+          },
+          "token_idx": {
+            "type": "integer",
+            "description": "Índice del token afectado (opcional)"
+          },
+          "tipo_error": {
+            "type": "string",
+            "description": "Categoría del error (concordancia, ortografía, sintaxis, etc.)"
+          },
+          "descripcion": {
+            "type": "string",
+            "description": "Explicación del error"
+          },
+          "sugerencia": {
+            "type": "string",
+            "description": "Posible corrección"
+          }
+        },
+        "required": ["tipo_error", "descripcion"]
+      }
+    }
+  },
+  "required": ["texto_original", "oraciones"]
+}

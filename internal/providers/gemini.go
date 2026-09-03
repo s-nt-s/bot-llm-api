@@ -62,6 +62,20 @@ type GeminiMessage struct {
 	PreviousInteractionID string `json:"previousInteractionID,omitempty"`
 }
 
+func (r *GeminiMessage) ToMessage(p *GeminiProvider, schema json.RawMessage) *config.Message {
+	m := &config.Message{
+		Reply:  r.Reply,
+		Status: r.Status,
+		Error:  r.Error,
+		Model:  p.Name(),
+	}
+	if len(schema) > 0 {
+		m.Json = []byte(r.Reply)
+		m.Reply = ""
+	}
+	return m
+}
+
 type geminiResponsePart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -121,45 +135,36 @@ func (p *GeminiProvider) Name() string {
 	return "gemini"
 }
 
-func (p *GeminiProvider) Query(systemPrompt string, userPrompt string) *config.Message {
+func (p *GeminiProvider) Query(input *bot.QueryInput) *config.Message {
 	r := p.ask(
-		systemPrompt,
-		userPrompt,
+		input.Schema,
+		input.SystemPrompt,
+		input.UserPrompt,
 		"",
 	)
-	return &config.Message{
-		Reply:  r.Reply,
-		Status: r.Status,
-		Error:  r.Error,
-		Model:  p.Name(),
-	}
+	return r.ToMessage(p, input.Schema)
 }
 
-func (p *GeminiProvider) Chat(
-	conversationKey bot.ConversationKey,
-	systemPrompt string,
-	userPrompt string,
-	history []bot.ConversationMessage,
-) *config.Message {
-	previousInteractionId := p.previousInteractionID(conversationKey)
-	input := p.buildInteractionInput(
-		conversationKey,
-		history,
-		userPrompt,
+func (p *GeminiProvider) Chat(input *bot.ChatInput) *config.Message {
+	previousInteractionId := p.previousInteractionID(input.ConversationKey)
+	i := p.buildInteractionInput(
+		input.ConversationKey,
+		input.History,
+		input.UserPrompt,
 		previousInteractionId == "",
 	)
 
-	r := p.ask(systemPrompt, input, previousInteractionId)
+	r := p.ask(
+		input.Schema,
+		input.SystemPrompt,
+		i,
+		previousInteractionId,
+	)
 
 	if r.PreviousInteractionID != "" {
-		p.storePreviousInteractionID(conversationKey, r.PreviousInteractionID)
+		p.storePreviousInteractionID(input.ConversationKey, r.PreviousInteractionID)
 	}
-	return &config.Message{
-		Reply:  r.Reply,
-		Status: r.Status,
-		Error:  r.Error,
-		Model:  p.Name(),
-	}
+	return r.ToMessage(p, input.Schema)
 }
 
 func (p *GeminiProvider) buildInteractionInput(
@@ -203,8 +208,8 @@ func (p *GeminiProvider) exhausted() {
 	p.readyAt = time.Now().Add(1 * time.Hour).Unix()
 }
 
-func (p *GeminiProvider) ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
-	r := p._ask(systemPrompt, input, previousInteractionId)
+func (p *GeminiProvider) ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string) GeminiMessage {
+	r := p._ask(schema, systemPrompt, input, previousInteractionId)
 	if r.Status != http.StatusOK {
 		p.exhausted()
 	}
@@ -236,18 +241,35 @@ func (p *GeminiProvider) post(payload map[string]any) (*http.Response, error) {
 	return resp, nil
 }
 
-func (p *GeminiProvider) _ask(systemPrompt string, input any, previousInteractionId string) GeminiMessage {
+func (p *GeminiProvider) _ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string) GeminiMessage {
 	if p == nil {
 		return GeminiMessage{Status: http.StatusBadGateway, Error: "gemini provider is not configured"}
 	}
-
-	payload := map[string]any{"model": p.model, "input": input}
+	payload := map[string]any{
+		"model": p.model,
+		"input": input,
+	}
 	if systemPrompt != "" {
 		payload["system_instruction"] = systemPrompt
 	}
 	if previousInteractionId != "" {
 		payload["previous_interaction_id"] = previousInteractionId
 	}
+	if len(schema) > 0 {
+		payload["response_format"] = map[string]any{
+			"type":      "text",
+			"mime_type": "application/json",
+			"schema":    schema,
+		}
+	}
+	/*
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			log.Printf("gemini request payload: failed to marshal JSON: %v", err)
+		} else {
+			log.Printf("gemini request payload: %s", payloadJSON)
+		}
+	*/
 	resp, err := p.post(payload)
 	if err != nil {
 		return GeminiMessage{Status: http.StatusBadGateway, Error: err.Error()}
@@ -258,6 +280,7 @@ func (p *GeminiProvider) _ask(systemPrompt string, input any, previousInteractio
 	if err != nil {
 		return GeminiMessage{Status: http.StatusBadGateway, Error: fmt.Errorf("read gemini response body: %w", err).Error()}
 	}
+	//log.Printf("gemini response body: %s", bodyBytes)
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		return GeminiMessage{Status: http.StatusBadGateway, Error: fmt.Errorf("gemini API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes))).Error()}
