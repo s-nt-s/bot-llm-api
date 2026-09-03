@@ -28,9 +28,9 @@ if ! id "${service_user}" >/dev/null 2>&1; then
 fi
 
 project_dir="$(cd "${project_dir}" && pwd)"
-go_path="$(command -v go || true)"
+go_path="$(sudo -u "${service_user}" -H bash -lc 'command -v go' 2>/dev/null || true)"
 if [[ -z ${go_path} ]]; then
-	echo "No se encontro el ejecutable go en PATH" >&2
+	echo "No se encontró el ejecutable go en el entorno de ${service_user}" >&2
 	exit 1
 fi
 
