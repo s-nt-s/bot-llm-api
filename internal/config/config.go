@@ -2,19 +2,22 @@ package config
 
 import (
 	"bot-api/common"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"strings"
-	"log"
 )
 
 const BotDirectory = "bot"
 
 type BotConfig struct {
-	Path    string `yaml:"path"`
-	Content string `yaml:"content"`
-	Name    string `yaml:"name"`
-	Profile string `yaml:"profile"`
+	Path    string          `yaml:"path"`
+	Name    string          `yaml:"name"`
+	Profile string          `yaml:"profile"`
+	Schema  json.RawMessage `yaml:"-"`
 }
 
 type UserConfig struct {
@@ -29,6 +32,30 @@ type Message struct {
 	Status int    `json:"status"`
 	Error  string `json:"error,omitempty"`
 	Model  string `json:"model,omitempty"`
+	IsJson bool   `json:"isJson,omitempty"`
+}
+
+func (m *Message) ToJSON() json.RawMessage {
+	reply := any(m.Reply)
+	if m.IsJson {
+		reply = json.RawMessage(m.Reply)
+	}
+	data, err := json.Marshal(struct {
+		Reply  any    `json:"reply,omitempty"`
+		Status int    `json:"status"`
+		Error  string `json:"error,omitempty"`
+		Model  string `json:"model,omitempty"`
+	}{
+		Reply:  reply,
+		Status: m.Status,
+		Error:  m.Error,
+		Model:  m.Model,
+	})
+	if err != nil {
+		log.Printf("Error marshaling message: %s", err.Error())
+		return json.RawMessage(fmt.Appendf(nil, `{"status":500,"error":"%s"}`, err.Error()))
+	}
+	return json.RawMessage(data)
 }
 
 func NewBotConfig(bot string) (*BotConfig, error) {
@@ -50,6 +77,19 @@ func NewBotConfig(bot string) (*BotConfig, error) {
 	if config.Profile == "" {
 		return nil, errors.New("bot configuration requires a non-empty profile")
 	}
+
+	schemaPath := filepath.Join(filepath.Dir(configPath), "schema.json")
+	schemaData, err := os.ReadFile(schemaPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read schema %s: %w", schemaPath, err)
+	}
+	if err == nil {
+		if err := json.Unmarshal(schemaData, &config.Schema); err != nil {
+			return nil, fmt.Errorf("decode schema %s: %w", schemaPath, err)
+		}
+		log.Printf("Loaded %s", schemaPath)
+	}
+
 	log.Printf("Loaded %s", configPath)
 	return config, nil
 }

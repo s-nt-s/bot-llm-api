@@ -3,6 +3,7 @@ package bot
 import (
 	"bot-api/common"
 	"bot-api/internal/config"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,13 +16,8 @@ type LLMProvider interface {
 	Name() string
 	IsReady() bool
 	Close()
-	Query(systemPrompt string, userPrompt string) *config.Message
-	Chat(
-		conversationKey ConversationKey,
-		systemPrompt string,
-		userPrompt string,
-		history []ConversationMessage,
-	) *config.Message
+	Query(input *QueryInput) *config.Message
+	Chat(input *ChatInput) *config.Message
 }
 
 type ConversationMessage struct {
@@ -38,6 +34,20 @@ type ConversationKey struct {
 type providerRegistry struct {
 	mu        sync.RWMutex
 	providers []LLMProvider
+}
+
+type ChatInput struct {
+	ConversationKey ConversationKey
+	SystemPrompt    string
+	UserPrompt      string
+	History         []ConversationMessage
+	Schema          json.RawMessage
+}
+
+type QueryInput struct {
+	SystemPrompt string
+	UserPrompt   string
+	Schema       json.RawMessage
 }
 
 func (r *providerRegistry) register(provider LLMProvider) {
@@ -255,7 +265,13 @@ func (c *Bot) DoChat(ask string) *config.Message {
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
-		r := provider.Chat(conversationKey, systemPrompt, userPrompt, c.history)
+		r := provider.Chat(&ChatInput{
+			ConversationKey: conversationKey,
+			SystemPrompt:    systemPrompt,
+			UserPrompt:      userPrompt,
+			History:         c.history,
+			Schema:          c.Config.Schema,
+		})
 
 		if r != nil && r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
@@ -298,7 +314,11 @@ func (c *Bot) DoQuery(ask string) *config.Message {
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
-		r := provider.Query(systemPrompt, ask)
+		r := provider.Query(&QueryInput{
+			SystemPrompt: systemPrompt,
+			UserPrompt:   ask,
+			Schema:       c.Config.Schema,
+		})
 		if r != nil && r.Status == http.StatusOK {
 			log.Printf("%v use %s", conversationKey, provider.Name())
 			return r
