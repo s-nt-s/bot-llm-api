@@ -34,13 +34,26 @@ type GeminiProvider struct {
 	client      *http.Client
 
 	mu                 sync.Mutex
-	conversationStates map[bot.ConversationKey]string
+	conversationStates map[bot.ConversationKey]InteractionState
 }
 
 type geminiConversationState struct {
-	BotName       string `json:"botName"`
-	UserName      string `json:"userName"`
-	InteractionID string `json:"interactionID"`
+	BotName         string `json:"botName"`
+	UserName        string `json:"userName"`
+	InteractionID   string `json:"interactionID"`
+	InteractionTime int64  `json:"interactionTime"`
+}
+
+type InteractionState struct {
+	Id   string `json:"id"`
+	Time int64  `json:"time"`
+}
+
+func newInteraction(id string) InteractionState {
+	return InteractionState{
+		Id:   id,
+		Time: time.Now().Unix(),
+	}
 }
 
 type geminiResult struct {
@@ -314,7 +327,7 @@ func init() {
 			endpoint:           geminiDefaultEndpoint,
 			model:              geminiDefaultModel,
 			readyAt:            -1,
-			conversationStates: map[bot.ConversationKey]string{},
+			conversationStates: map[bot.ConversationKey]InteractionState{},
 		}
 		g.name = fmt.Sprintf("%s (%d)", g.model, i+1)
 		g.Load()
@@ -329,8 +342,8 @@ func (p *GeminiProvider) previousInteractionID(k bot.ConversationKey) string {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if id, ok := p.conversationStates[k]; ok {
-		return id
+	if i, ok := p.conversationStates[k]; ok {
+		return i.Id
 	}
 	return ""
 }
@@ -341,7 +354,7 @@ func (p *GeminiProvider) storePreviousInteractionID(k bot.ConversationKey, inter
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.conversationStates[k] = interactionID
+	p.conversationStates[k] = newInteraction(interactionID)
 }
 
 func (p *GeminiProvider) filePathStore() string {
@@ -359,11 +372,12 @@ func (p *GeminiProvider) Close() {
 
 	p.mu.Lock()
 	states := make([]geminiConversationState, 0, len(p.conversationStates))
-	for key, interactionID := range p.conversationStates {
+	for key, i := range p.conversationStates {
 		states = append(states, geminiConversationState{
-			BotName:       key.BotName,
-			UserName:      key.UserName,
-			InteractionID: interactionID,
+			BotName:         key.BotName,
+			UserName:        key.UserName,
+			InteractionID:   i.Id,
+			InteractionTime: i.Time,
 		})
 	}
 	p.mu.Unlock()
@@ -412,7 +426,7 @@ func (p *GeminiProvider) Load() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.conversationStates == nil {
-		p.conversationStates = make(map[bot.ConversationKey]string)
+		p.conversationStates = make(map[bot.ConversationKey]InteractionState)
 	}
 	for _, state := range states {
 		key := bot.ConversationKey{
@@ -420,7 +434,10 @@ func (p *GeminiProvider) Load() {
 			UserName: state.UserName,
 		}
 		if _, exists := p.conversationStates[key]; !exists {
-			p.conversationStates[key] = state.InteractionID
+			p.conversationStates[key] = InteractionState{
+				Id:   state.InteractionID,
+				Time: state.InteractionTime,
+			}
 		}
 	}
 }
