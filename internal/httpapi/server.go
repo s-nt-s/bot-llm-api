@@ -89,7 +89,7 @@ func HandleRequest(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, resp.Status, resp)
+	writeJSON(w, resp.Status, resp.ToJSON())
 }
 
 func getResponse(endpoint EndpointType, botConfig *config.BotConfig, user *config.UserConfig, ask string) *config.Message {

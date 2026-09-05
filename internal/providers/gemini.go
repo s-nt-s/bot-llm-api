@@ -68,10 +68,7 @@ func (r *GeminiMessage) ToMessage(p *GeminiProvider, schema json.RawMessage) *co
 		Status: r.Status,
 		Error:  r.Error,
 		Model:  p.Name(),
-	}
-	if len(schema) > 0 {
-		m.Json = []byte(r.Reply)
-		m.Reply = ""
+		IsJson: len(schema) > 0,
 	}
 	return m
 }

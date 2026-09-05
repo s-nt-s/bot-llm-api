@@ -28,11 +28,34 @@ type UserConfig struct {
 }
 
 type Message struct {
-	Reply  string          `json:"reply,omitempty"`
-	Json   json.RawMessage `json:"json,omitempty"`
-	Status int             `json:"status"`
-	Error  string          `json:"error,omitempty"`
-	Model  string          `json:"model,omitempty"`
+	Reply  string `json:"reply,omitempty"`
+	Status int    `json:"status"`
+	Error  string `json:"error,omitempty"`
+	Model  string `json:"model,omitempty"`
+	IsJson bool   `json:"isJson,omitempty"`
+}
+
+func (m *Message) ToJSON() json.RawMessage {
+	reply := any(m.Reply)
+	if m.IsJson {
+		reply = json.RawMessage(m.Reply)
+	}
+	data, err := json.Marshal(struct {
+		Reply  any    `json:"reply,omitempty"`
+		Status int    `json:"status"`
+		Error  string `json:"error,omitempty"`
+		Model  string `json:"model,omitempty"`
+	}{
+		Reply:  reply,
+		Status: m.Status,
+		Error:  m.Error,
+		Model:  m.Model,
+	})
+	if err != nil {
+		log.Printf("Error marshaling message: %s", err.Error())
+		return json.RawMessage(fmt.Appendf(nil, `{"status":500,"error":"%s"}`, err.Error()))
+	}
+	return json.RawMessage(data)
 }
 
 func NewBotConfig(bot string) (*BotConfig, error) {
