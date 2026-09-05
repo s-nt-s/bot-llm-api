@@ -17,6 +17,7 @@ type BotConfig struct {
 	Path    string          `yaml:"path"`
 	Name    string          `yaml:"name"`
 	Profile string          `yaml:"profile"`
+	Fetch   bool            `yaml:"fetch"`
 	Schema  json.RawMessage `yaml:"-"`
 }
 

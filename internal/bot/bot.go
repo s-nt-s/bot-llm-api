@@ -5,8 +5,11 @@ import (
 	"bot-api/internal/config"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -49,6 +52,10 @@ type QueryInput struct {
 	UserPrompt   string
 	Schema       json.RawMessage
 }
+
+const maxFetchedContentSize = 1 << 20
+
+var userPromptHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 func (r *providerRegistry) register(provider LLMProvider) {
 	r.mu.Lock()
@@ -243,6 +250,35 @@ func (c *Bot) GetConversationKey() ConversationKey {
 	return k
 }
 
+func (c *Bot) getUserPrompt(ask string) string {
+	if c == nil || c.Config == nil || !c.Config.Fetch {
+		return ask
+	}
+
+	address := strings.TrimSpace(ask)
+	if address == "" || strings.ContainsAny(address, " \t\r\n") {
+		return ask
+	}
+
+	parsedURL, err := url.Parse(address)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		return ask
+	}
+
+	response, err := userPromptHTTPClient.Get(address)
+	if err != nil {
+		return ask
+	}
+	defer response.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxFetchedContentSize))
+	if readErr != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return ask
+	}
+	log.Printf("Fetched %d bytes from %s for user prompt", len(body), address)
+	return string(body)
+}
+
 func (c *Bot) DoChat(ask string) *config.Message {
 	if c == nil {
 		return &config.Message{Status: http.StatusBadGateway, Error: "bot is nil"}
@@ -259,7 +295,7 @@ func (c *Bot) DoChat(ask string) *config.Message {
 		return &config.Message{Status: http.StatusServiceUnavailable, Error: "no LLM providers configured"}
 	}
 	systemPrompt := c.GetSystemPrompt()
-	userPrompt := ask
+	userPrompt := c.getUserPrompt(ask)
 	var lastErr *config.Message = nil
 	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
@@ -316,7 +352,7 @@ func (c *Bot) DoQuery(ask string) *config.Message {
 		}
 		r := provider.Query(&QueryInput{
 			SystemPrompt: systemPrompt,
-			UserPrompt:   ask,
+			UserPrompt:   c.getUserPrompt(ask),
 			Schema:       c.Config.Schema,
 		})
 		if r != nil && r.Status == http.StatusOK {
