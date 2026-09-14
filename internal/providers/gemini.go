@@ -151,6 +151,7 @@ func (p *GeminiProvider) Query(input *bot.QueryInput) *config.Message {
 		input.SystemPrompt,
 		input.UserPrompt,
 		"",
+		input.Temperature,
 	)
 	return r.ToMessage(p, input.Schema)
 }
@@ -169,6 +170,7 @@ func (p *GeminiProvider) Chat(input *bot.ChatInput) *config.Message {
 		input.SystemPrompt,
 		i,
 		previousInteractionId,
+		input.Temperature,
 	)
 
 	if r.PreviousInteractionID != "" {
@@ -218,8 +220,8 @@ func (p *GeminiProvider) exhausted() {
 	p.readyAt = time.Now().Add(1 * time.Hour).Unix()
 }
 
-func (p *GeminiProvider) ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string) GeminiMessage {
-	r := p._ask(schema, systemPrompt, input, previousInteractionId)
+func (p *GeminiProvider) ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string, temperature int) GeminiMessage {
+	r := p._ask(schema, systemPrompt, input, previousInteractionId, temperature)
 	if r.Status != http.StatusOK {
 		p.exhausted()
 	}
@@ -251,7 +253,7 @@ func (p *GeminiProvider) post(payload map[string]any) (*http.Response, error) {
 	return resp, nil
 }
 
-func (p *GeminiProvider) _ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string) GeminiMessage {
+func (p *GeminiProvider) _ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string, temperature int) GeminiMessage {
 	if p == nil {
 		return GeminiMessage{Status: http.StatusBadGateway, Error: "gemini provider is not configured"}
 	}
@@ -264,6 +266,11 @@ func (p *GeminiProvider) _ask(schema json.RawMessage, systemPrompt string, input
 	}
 	if previousInteractionId != "" {
 		payload["previous_interaction_id"] = previousInteractionId
+	}
+	if temperature >= 0 {
+		payload["generation_config"] = map[string]any{
+			"temperature": temperature,
+		}
 	}
 	if len(schema) > 0 {
 		payload["response_format"] = map[string]any{

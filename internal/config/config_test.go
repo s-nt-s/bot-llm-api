@@ -3,7 +3,29 @@ package config
 import (
 	"encoding/json"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestBotConfigTemperatureDefaultsToNegativeOne(t *testing.T) {
+	var config BotConfig
+	if err := yaml.Unmarshal([]byte("name: test\n"), &config); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+	if config.Temperature != -1 {
+		t.Fatalf("Temperature = %d, want -1", config.Temperature)
+	}
+}
+
+func TestBotConfigTemperaturePreservesExplicitValue(t *testing.T) {
+	var config BotConfig
+	if err := yaml.Unmarshal([]byte("temperature: 0\n"), &config); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+	if config.Temperature != 0 {
+		t.Fatalf("Temperature = %d, want 0", config.Temperature)
+	}
+}
 
 func TestMessageToJSONUsesRawReplyWhenIsJson(t *testing.T) {
 	data := (&Message{

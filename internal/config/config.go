@@ -9,16 +9,29 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 const BotDirectory = "bot"
 
 type BotConfig struct {
-	Path    string          `yaml:"path"`
-	Name    string          `yaml:"name"`
-	Profile string          `yaml:"profile"`
-	Fetch   bool            `yaml:"fetch"`
-	Schema  json.RawMessage `yaml:"-"`
+	Path        string          `yaml:"path"`
+	Name        string          `yaml:"name"`
+	Profile     string          `yaml:"profile"`
+	Fetch       bool            `yaml:"fetch"`
+	Temperature int             `yaml:"temperature"`
+	Schema      json.RawMessage `yaml:"-"`
+}
+
+func (c *BotConfig) UnmarshalYAML(value *yaml.Node) error {
+	type botConfig BotConfig
+	config := botConfig{Temperature: -1}
+	if err := value.Decode(&config); err != nil {
+		return err
+	}
+	*c = BotConfig(config)
+	return nil
 }
 
 type UserConfig struct {

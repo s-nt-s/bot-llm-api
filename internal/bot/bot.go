@@ -3,12 +3,15 @@ package bot
 import (
 	"bot-api/common"
 	"bot-api/internal/config"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -45,12 +48,72 @@ type ChatInput struct {
 	UserPrompt      string
 	History         []ConversationMessage
 	Schema          json.RawMessage
+	Temperature     int
 }
 
 type QueryInput struct {
 	SystemPrompt string
 	UserPrompt   string
 	Schema       json.RawMessage
+	Temperature  int
+}
+
+func (q *QueryInput) dump(conversationKey *ConversationKey, r *config.Message) {
+	cachePath := q.getPathCache(conversationKey)
+	if cachePath == "" || r == nil {
+		return
+	}
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		log.Printf("failed to encode query cache %s: %v", cachePath, err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0700); err != nil {
+		log.Printf("failed to create query cache directory for %s: %v", cachePath, err)
+		return
+	}
+	if err := os.WriteFile(cachePath, data, 0600); err != nil {
+		log.Printf("failed to write query cache %s: %v", cachePath, err)
+		return
+	}
+	log.Printf("Save cache message in %s", cachePath)
+}
+func (q *QueryInput) load(conversationKey *ConversationKey) *config.Message {
+	cachePath := q.getPathCache(conversationKey)
+	if cachePath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil
+	}
+	var message config.Message
+	if err := json.Unmarshal(data, &message); err != nil {
+		log.Printf("failed to decode query cache %s: %v", cachePath, err)
+		return nil
+	}
+	log.Printf("Load cache message from %s", cachePath)
+	return &message
+}
+
+func (q *QueryInput) getPathCache(k *ConversationKey) string {
+	if q == nil || q.Temperature != 0 {
+		return ""
+	}
+	data, err := json.Marshal(q)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(data)
+	path := fmt.Sprintf("%x.json", hash)
+	if k.UserName != "" {
+		path = k.UserName + "/" + path
+	}
+	if k.BotName != "" {
+		path = k.BotName + "/" + path
+	}
+	return "data/cache/" + path
 }
 
 const maxFetchedContentSize = 1 << 20
@@ -294,20 +357,20 @@ func (c *Bot) DoChat(ask string) *config.Message {
 	if len(providers) == 0 {
 		return &config.Message{Status: http.StatusServiceUnavailable, Error: "no LLM providers configured"}
 	}
-	systemPrompt := c.GetSystemPrompt()
-	userPrompt := c.getUserPrompt(ask)
+	chatInput := ChatInput{
+		ConversationKey: conversationKey,
+		SystemPrompt:    c.GetSystemPrompt(),
+		UserPrompt:      c.getUserPrompt(ask),
+		History:         c.history,
+		Schema:          c.Config.Schema,
+		Temperature:     c.Config.Temperature,
+	}
 	var lastErr *config.Message = nil
 	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
-		r := provider.Chat(&ChatInput{
-			ConversationKey: conversationKey,
-			SystemPrompt:    systemPrompt,
-			UserPrompt:      userPrompt,
-			History:         c.history,
-			Schema:          c.Config.Schema,
-		})
+		r := provider.Chat(&chatInput)
 
 		if r != nil && r.Status == http.StatusOK {
 			c.addIteration(askTime, ask, r.Reply)
@@ -344,18 +407,24 @@ func (c *Bot) DoQuery(ask string) *config.Message {
 	}
 
 	conversationKey := c.GetConversationKey()
-	systemPrompt := c.GetSystemPrompt()
+	queryInput := QueryInput{
+		SystemPrompt: c.GetSystemPrompt(),
+		UserPrompt:   c.getUserPrompt(ask),
+		Schema:       c.Config.Schema,
+		Temperature:  c.Config.Temperature,
+	}
+	if cachedReply := queryInput.load(&conversationKey); cachedReply != nil {
+		return cachedReply
+	}
+
 	var lastErr *config.Message
 	for _, provider := range providers {
 		if provider == nil || !provider.IsReady() {
 			continue
 		}
-		r := provider.Query(&QueryInput{
-			SystemPrompt: systemPrompt,
-			UserPrompt:   c.getUserPrompt(ask),
-			Schema:       c.Config.Schema,
-		})
+		r := provider.Query(&queryInput)
 		if r != nil && r.Status == http.StatusOK {
+			queryInput.dump(&conversationKey, r)
 			log.Printf("%v use %s", conversationKey, provider.Name())
 			return r
 		}

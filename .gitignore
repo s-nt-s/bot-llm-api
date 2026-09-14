@@ -1,4 +1,5 @@
 data/gemini/
+data/cache/
 bot/*
 !bot/conciso/
 !bot/socrates/
