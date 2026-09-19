@@ -45,14 +45,16 @@ type geminiConversationState struct {
 }
 
 type InteractionState struct {
-	Id   string `json:"id"`
-	Time int64  `json:"time"`
+	Id    string `json:"id"`
+	Time  int64  `json:"time"`
+	Reply string `json:"-"`
 }
 
-func newInteraction(id string) InteractionState {
+func newInteraction(id string, reply string) InteractionState {
 	return InteractionState{
-		Id:   id,
-		Time: time.Now().Unix(),
+		Id:    id,
+		Reply: reply,
+		Time:  time.Now().Unix(),
 	}
 }
 
@@ -157,14 +159,18 @@ func (p *GeminiProvider) Query(input *bot.QueryInput) *config.Message {
 }
 
 func (p *GeminiProvider) Chat(input *bot.ChatInput) *config.Message {
-	previousInteractionId := p.previousInteractionID(input.ConversationKey)
+	prev := p.previousInteraction(input.ConversationKey)
+	hasPrevId := prev != nil && prev.Id != ""
 	i := p.buildInteractionInput(
 		input.ConversationKey,
 		input.History,
 		input.UserPrompt,
-		previousInteractionId == "",
+		len(input.History) > 0 && (!hasPrevId || input.History[len(input.History)-1].Message != prev.Reply),
 	)
-
+	previousInteractionId := ""
+	if hasPrevId {
+		previousInteractionId = prev.Id
+	}
 	r := p.ask(
 		input.Schema,
 		input.SystemPrompt,
@@ -174,7 +180,11 @@ func (p *GeminiProvider) Chat(input *bot.ChatInput) *config.Message {
 	)
 
 	if r.PreviousInteractionID != "" {
-		p.storePreviousInteractionID(input.ConversationKey, r.PreviousInteractionID)
+		p.storePreviousInteractionID(
+			input.ConversationKey,
+			r.PreviousInteractionID,
+			r.Reply,
+		)
 	}
 	return r.ToMessage(p, input.Schema)
 }
@@ -188,6 +198,7 @@ func (p *GeminiProvider) buildInteractionInput(
 	if !includeHistory || len(history) == 0 {
 		return userPrompt
 	}
+	log.Printf("Gemini add %s items of history", len(history))
 
 	input := make([]map[string]any, 0, len(history)+1)
 	for _, msg := range history {
@@ -217,7 +228,7 @@ func (p *GeminiProvider) buildInteractionInput(
 }
 
 func (p *GeminiProvider) exhausted() {
-	p.readyAt = time.Now().Add(1 * time.Hour).Unix()
+	p.readyAt = time.Now().Add(time.Minute).Unix()
 }
 
 func (p *GeminiProvider) ask(schema json.RawMessage, systemPrompt string, input any, previousInteractionId string, temperature int) GeminiMessage {
@@ -363,25 +374,25 @@ func init() {
 	}
 }
 
-func (p *GeminiProvider) previousInteractionID(k bot.ConversationKey) string {
+func (p *GeminiProvider) previousInteraction(k bot.ConversationKey) *InteractionState {
 	if p == nil || p.conversationStates == nil {
-		return ""
+		return nil
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if i, ok := p.conversationStates[k]; ok {
-		return i.Id
+		return &i
 	}
-	return ""
+	return nil
 }
 
-func (p *GeminiProvider) storePreviousInteractionID(k bot.ConversationKey, interactionID string) {
+func (p *GeminiProvider) storePreviousInteractionID(k bot.ConversationKey, interactionID string, reply string) {
 	if p == nil || interactionID == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.conversationStates[k] = newInteraction(interactionID)
+	p.conversationStates[k] = newInteraction(interactionID, reply)
 }
 
 func (p *GeminiProvider) filePathStore() string {
