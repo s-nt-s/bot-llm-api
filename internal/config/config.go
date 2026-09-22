@@ -52,7 +52,11 @@ type Message struct {
 func (m *Message) ToJSON() json.RawMessage {
 	reply := any(m.Reply)
 	if m.IsJson {
-		reply = json.RawMessage(m.Reply)
+		if len(m.Reply) == 0 {
+			reply = nil
+		} else {
+			reply = json.RawMessage(m.Reply)
+		}
 	}
 	data, err := json.Marshal(struct {
 		Reply  any    `json:"reply,omitempty"`
