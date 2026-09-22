@@ -107,6 +107,18 @@ func getValues(r *http.Request) url.Values {
 	if r.Method == http.MethodGet {
 		return r.URL.Query()
 	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			return url.Values{}
+		}
+
+		values := url.Values{}
+		if ask, ok := payload["ask"].(string); ok {
+			values.Set("ask", ask)
+		}
+		return values
+	}
 	if err := r.ParseForm(); err == nil {
 		return r.Form
 	}
