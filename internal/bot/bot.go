@@ -164,7 +164,7 @@ func (r *providerRegistry) snapshot(current *LLMProvider) []LLMProvider {
 }
 
 const (
-	defaultBotHistoryMaxMessages = 100
+	defaultBotHistoryMaxMessages = 10
 	defaultBotCacheMaxEntries    = 1000
 )
 
@@ -235,13 +235,11 @@ func (c *botCacheStore) get(configItem *config.BotConfig, user *config.UserConfi
 	log.Printf("New bot for %v", k)
 	botItem = &Bot{Config: configItem, User: user}
 
-	if len(c.bots)+1 > botCacheMaxEntries {
-		if len(c.order) > 0 {
-			oldest := c.order[0]
-			delete(c.bots, oldest)
-			c.order = c.order[1:]
-			log.Printf("Evicting bot cache entry for %v to enforce max %d entries", oldest, botCacheMaxEntries)
-		}
+	if len(c.bots)+1 > botCacheMaxEntries && len(c.order) > 0 {
+		oldest := c.order[0]
+		delete(c.bots, oldest)
+		c.order = c.order[1:]
+		log.Printf("Evicting bot cache entry for %v to enforce max %d entries", oldest, botCacheMaxEntries)
 	}
 
 	c.bots[k] = botItem
